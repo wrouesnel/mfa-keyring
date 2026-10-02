@@ -1,0 +1,71 @@
+.TH PIV-KEYRING 1 "2026-10-02" "piv-keyring" "User Commands"
+.SH NAME
+piv-keyring \- unlock the GNOME login keyring with a PIV card or FIDO2 key
+.SH SYNOPSIS
+.B piv-keyring
+.RI [ options ]
+.I command
+.SH DESCRIPTION
+.B piv-keyring enroll
+changes the login keyring password to a random 256-bit secret and stores that
+secret in
+.I ~/.local/share/piv-keyring/login.wrap,
+sealed to a PIV card key (default: the key management key, PKCS#11 id 03) or,
+with
+.BR \-\-fido2 ,
+to a FIDO2 security key, and also to your login password so that password logins
+keep working.
+.BR pam_piv_keyring (8)
+recovers the secret at login.
+.SH COMMANDS
+.TP
+.B status
+Show slots and whether the login keyring is locked.
+.TP
+.B list-keys
+List keys on connected cards.
+.TP
+.B enroll
+First-time setup.  Asks for the current keyring password (normally the login
+password), the card PIN (to prove the card can unwrap the secret) and the login
+password for the password slot.
+.TP
+.B add-piv\fR, \fBadd-fido2
+Add another card key or security key, e.g. a backup.
+.TP
+.B set-password
+Re-create the password slot with a card or security key, e.g. after an
+administrator reset your password.
+.TP
+.BI remove " N"
+Remove slot N.
+.TP
+.B unlock
+Unlock the running login keyring with a card or security key.
+.TP
+.B disenroll
+Set an ordinary keyring password and delete the wrap file.
+.SH OPTIONS
+.TP
+.BI \-\-key " ID"
+Card key: PKCS#11 id in hex or keyid prefix (8+ hex digits).
+.TP
+.B \-\-fido2
+enroll with a FIDO2 security key.
+.TP
+.B \-\-uv
+FIDO2: also require the security key PIN at every unlock.
+.TP
+.B \-\-no-password-slot
+enroll without a password slot: only the card/key can unlock the keyring.
+.TP
+.B \-\-force
+enroll over an existing wrap file.
+.TP
+.BI \-\-module " PATH"
+PKCS#11 module.
+.TP
+.BI \-\-file " PATH"
+Wrap file.
+.SH SEE ALSO
+.BR pam_piv_keyring (8)

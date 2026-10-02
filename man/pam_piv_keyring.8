@@ -1,0 +1,77 @@
+.TH PAM_PIV_KEYRING 8 "2026-10-02" "piv-keyring" "Linux-PAM Manual"
+.SH NAME
+pam_piv_keyring \- unlock the GNOME login keyring after smartcard, FIDO2 or password login
+.SH SYNOPSIS
+.B pam_piv_keyring.so
+.RB [ mode=piv | mode=login ]
+.RB [ file=\fIpath\fR ]
+.RB [ module=\fIpkcs11.so\fR ]
+.RB [ only_if=\fIservice\fR,... ]
+.RB [ prompt_pin ]
+.RB [ nofido2 ]
+.RB [ debug ]
+.SH DESCRIPTION
+The login keyring is protected by a random 256-bit secret.  The secret is stored
+in a per-user wrap file, sealed separately for each enrolled unlock method
+("slot"): a PIV card key, a FIDO2 security key (hmac-secret extension) or the
+login password (Argon2id).  Enrol with
+.BR piv-keyring (1).
+.PP
+In the auth stack the module recovers the secret and sets it as PAM_AUTHTOK, so
+.B pam_gnome_keyring
+(which must come after it) unlocks the keyring with it.
+.PP
+In the password stack it re-wraps the password slot when the login password is
+changed, using PAM_OLDAUTHTOK and PAM_AUTHTOK as set by
+.BR pam_unix (8).
+.SH OPTIONS
+.TP
+.B mode=piv
+PAM_AUTHTOK holds the card PIN, as forwarded by
+.B pam_sss forward_pass
+after smartcard authentication.  The module logs in to the card with it and
+unwraps the secret.  If that fails, PAM_AUTHTOK is cleared so that the PIN is
+never used as a keyring password.  The PIN is never tried when the token reports
+it locked or on its final try, or when its length is outside the token's range.
+Only place this mode where PAM_AUTHTOK can only be a PIN.
+.TP
+.B mode=login
+(default) If PAM_AUTHTOK is set, it is the login password and unlocks the
+password slot.  If it is not set (for example after passwordless
+.BR pam_u2f (8)),
+the module asks for a touch on an enrolled FIDO2 security key.
+.TP
+.BI file= path
+Wrap file; %h is the home directory, %u the user name.
+Default: %h/.local/share/piv-keyring/login.wrap.  The file is read with the
+user's filesystem credentials and must be owned by the user and not group or
+world writable.
+.TP
+.BI module= path
+PKCS#11 module used to reach the card (default: OpenSC).
+.TP
+.BI only_if= services
+Only act for these comma-separated PAM services.
+.TP
+.B prompt_pin
+mode=piv: ask for the PIN if PAM_AUTHTOK is empty.
+.TP
+.B nofido2
+mode=login: never ask for a security key touch.
+.TP
+.B debug
+Log more.
+.SH FILES
+.TP
+.I /etc/pam.d/gdm-smartcard-sssd-piv-keyring
+GDM smartcard stack using mode=piv, installed as an alternative for
+/etc/pam.d/gdm-smartcard.
+.TP
+.I /usr/share/pam-configs/piv-keyring
+pam-auth-update profile adding mode=login (for gdm-password) and the password
+stack hook.
+.SH SEE ALSO
+.BR piv-keyring (1),
+.BR pam_gnome_keyring (8),
+.BR pam_sss (8),
+.BR pam_u2f (8)

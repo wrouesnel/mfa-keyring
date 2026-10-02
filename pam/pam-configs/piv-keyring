@@ -1,0 +1,9 @@
+Name: Unlock GNOME keyring from password or FIDO2 key (piv-keyring)
+Default: yes
+Priority: -128
+Auth-Type: Additional
+Auth:
+	optional	pam_piv_keyring.so mode=login only_if=gdm-password
+Password-Type: Additional
+Password:
+	optional	pam_piv_keyring.so
