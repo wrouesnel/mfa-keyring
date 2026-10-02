@@ -1,0 +1,9 @@
+Name: MFA keyring: password changes and ZFS home unlock
+Default: yes
+Priority: 129
+Auth-Type: Additional
+Auth:
+	optional	pam_mfa_keyring.so mode=login zfs_only skip_if=sudo,sudo-i,polkit-1
+Password-Type: Additional
+Password:
+	optional	pam_mfa_keyring.so

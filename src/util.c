@@ -331,3 +331,15 @@ out:
 	free(dircopy);
 	return r;
 }
+
+int mfakr_unlink_user_file(const char *path, uid_t uid, gid_t gid)
+{
+	struct fscreds c;
+	int r = creds_enter(&c, uid, gid);
+
+	if (r < 0)
+		return r;
+	r = unlink(path) < 0 ? -errno : 0;
+	creds_leave(&c);
+	return r;
+}

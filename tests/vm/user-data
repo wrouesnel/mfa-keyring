@@ -2,4 +2,4 @@
 hostname: mfakr-test
 ssh_pwauth: false
 runcmd:
-  - [ bash, -c, "mount -o ro /dev/disk/by-label/PIVTEST /mnt && bash /mnt/vmtest.sh; sync; poweroff" ]
+  - [ bash, -c, "mount -o ro /dev/disk/by-label/MFATEST /mnt && bash /mnt/vmtest.sh; sync; poweroff" ]

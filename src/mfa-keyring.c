@@ -7,10 +7,13 @@
 
 #include <errno.h>
 #include <getopt.h>
+#include <libgen.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -27,10 +30,15 @@
 static const char *opt_module = DEFAULT_PKCS11_MODULE;
 static const char *opt_file;
 static const char *opt_key;
+static const char *opt_user;
+static const char *opt_dataset;
 static int opt_fido2, opt_uv, opt_no_password, opt_force;
 
+/* The user whose wrap file we work on (the caller, or --user/SUDO_USER for root). */
 static struct passwd *me;
 static char *wrap_path;
+/* Candidate locations, in the order pam_mfa_keyring searches them. */
+static char *system_path, *home_path;
 
 static void die(const char *fmt, ...) __attribute__((noreturn, format(printf, 1, 2)));
 static void die(const char *fmt, ...)
@@ -114,7 +122,7 @@ static int load(struct mfakr_wrapfile *wf)
 {
 	char *data;
 	size_t len;
-	int r = mfakr_read_user_file(wrap_path, getuid(), getgid(), &data, &len);
+	int r = mfakr_read_user_file(wrap_path, me->pw_uid, me->pw_gid, &data, &len);
 
 	if (r == -ENOENT)
 		return r;
@@ -142,7 +150,7 @@ static void save(const struct mfakr_wrapfile *wf)
 
 	if (!data)
 		die("out of memory");
-	r = mfakr_write_user_file(wrap_path, getuid(), getgid(), data, strlen(data));
+	r = mfakr_write_user_file(wrap_path, me->pw_uid, me->pw_gid, data, strlen(data));
 	free(data);
 	if (r < 0)
 		die("cannot write %s: %s", wrap_path, strerror(-r));
@@ -270,6 +278,8 @@ static int cmd_status(void)
 		return 1;
 	}
 	printf("Wrap file: %s\nUser: %s\n", wrap_path, wf.user);
+	if (wf.zfs_dataset)
+		printf("ZFS home: %s (its key is the secret)\n", wf.zfs_dataset);
 	for (int i = 0; i < wf.nslots; i++) {
 		const struct mfakr_slot *s = &wf.slots[i];
 
@@ -488,6 +498,9 @@ static int cmd_disenroll(void)
 	char pw[MFAKR_PASSWORD_LEN + 1], *newpw, *err = NULL;
 
 	load_or_die(&wf);
+	if (wf.zfs_dataset)
+		die("%s still uses the secret as its key; run 'sudo mfa-keyring zfs-disenroll' first",
+		    wf.zfs_dataset);
 	recover_secret(&wf, secret, 1);
 	mfakr_secret_to_password(secret, pw);
 	sodium_memzero(secret, sizeof(secret));
@@ -500,6 +513,250 @@ static int cmd_disenroll(void)
 		die("keyring password changed, but cannot remove %s: %s", wrap_path, strerror(errno));
 	mfakr_wf_free(&wf);
 	printf("Disenrolled.  The login keyring now uses the password you entered.\n");
+	return 0;
+}
+
+/* ---------------------------------------------------------------- ZFS --- */
+
+struct zds {
+	char name[256];
+	char mountpoint[4096];
+	char encroot[256];
+	char keyformat[32];
+	char keystatus[32];
+};
+
+/* Find a filesystem by name, or (name NULL) by mountpoint. */
+static int zfs_find(const char *name, const char *mountpoint, struct zds *out)
+{
+	FILE *f = popen("zfs list -H -o name,mountpoint,encryptionroot,keyformat,keystatus "
+	                "-t filesystem", "r");
+	char line[8192];
+	int found = 0;
+
+	if (!f)
+		die("cannot run zfs");
+	while (!found && fgets(line, sizeof(line), f)) {
+		char *save = NULL, *fld[5];
+		int n = 0;
+
+		line[strcspn(line, "\n")] = '\0';
+		for (char *t = strtok_r(line, "\t", &save); t && n < 5; t = strtok_r(NULL, "\t", &save))
+			fld[n++] = t;
+		if (n != 5)
+			continue;
+		if (name ? strcmp(fld[0], name) != 0 : strcmp(fld[1], mountpoint) != 0)
+			continue;
+		snprintf(out->name, sizeof(out->name), "%s", fld[0]);
+		snprintf(out->mountpoint, sizeof(out->mountpoint), "%s", fld[1]);
+		snprintf(out->encroot, sizeof(out->encroot), "%s", fld[2]);
+		snprintf(out->keyformat, sizeof(out->keyformat), "%s", fld[3]);
+		snprintf(out->keystatus, sizeof(out->keystatus), "%s", fld[4]);
+		found = 1;
+	}
+	pclose(f);
+	return found ? 0 : -ENOENT;
+}
+
+/* Runs zfs with argv, feeding input (a passphrase) on stdin.  Returns the exit status. */
+static int run_zfs(const char *const *argv, const char *input)
+{
+	int fds[2], status;
+	pid_t pid;
+
+	if (pipe(fds) < 0)
+		die("pipe: %s", strerror(errno));
+	pid = fork();
+	if (pid < 0)
+		die("fork: %s", strerror(errno));
+	if (pid == 0) {
+		dup2(fds[0], STDIN_FILENO);
+		close(fds[0]);
+		close(fds[1]);
+		execvp("zfs", (char *const *) argv);
+		_exit(127);
+	}
+	close(fds[0]);
+	if (input) {
+		size_t len = strlen(input);
+		if (write(fds[1], input, len) != (ssize_t) len || write(fds[1], "\n", 1) != 1)
+			fprintf(stderr, "short write to zfs\n");
+	}
+	close(fds[1]);
+	if (waitpid(pid, &status, 0) < 0)
+		die("waitpid: %s", strerror(errno));
+	return WIFEXITED(status) ? WEXITSTATUS(status) : 128;
+}
+
+static void zfs_resolve(const struct mfakr_wrapfile *wf, struct zds *ds)
+{
+	const char *name = opt_dataset ? opt_dataset : wf ? wf->zfs_dataset : NULL;
+
+	if (zfs_find(name, me->pw_dir, ds) < 0)
+		die(name ? "ZFS dataset %s not found" : "no ZFS dataset is mounted at %s%s",
+		    name ? name : me->pw_dir, name ? "" : " (use --dataset)");
+	if (strcmp(ds->encroot, ds->name) != 0)
+		die("%s is not its own encryption root (it inherits its key from %s); "
+		    "only a per-user encrypted home can use the secret", ds->name, ds->encroot);
+	if (strcmp(ds->keyformat, "passphrase") != 0)
+		die("%s has keyformat=%s; pam_zfs_key needs keyformat=passphrase",
+		    ds->name, ds->keyformat);
+}
+
+/* Loads the dataset key with passphrase if needed.  Returns 1 if we loaded it. */
+static int zfs_ensure_loaded(const struct zds *ds, const char *passphrase)
+{
+	const char *argv[] = { "zfs", "load-key", ds->name, NULL };
+
+	if (strcmp(ds->keystatus, "available") == 0)
+		return 0;
+	if (run_zfs(argv, passphrase) != 0)
+		die("could not load the key for %s", ds->name);
+	return 1;
+}
+
+static void zfs_unload(const struct zds *ds)
+{
+	const char *argv[] = { "zfs", "unload-key", ds->name, NULL };
+
+	if (run_zfs(argv, NULL) != 0)
+		fprintf(stderr, "warning: could not unload the key for %s again\n", ds->name);
+}
+
+static int zfs_change_key(const struct zds *ds, const char *passphrase)
+{
+	const char *argv[] = { "zfs", "change-key", "-o", "keyformat=passphrase",
+	                       "-o", "keylocation=prompt", ds->name, NULL };
+
+	return run_zfs(argv, passphrase);
+}
+
+/* Creates MFAKR_STATE_DIR/<user>/ owned by the user, mode 0700. */
+static void ensure_user_state_dir(void)
+{
+	char dir[4096];
+	struct stat st;
+
+	if (mkdir(MFAKR_STATE_DIR, 0755) < 0 && errno != EEXIST)
+		die("cannot create %s: %s", MFAKR_STATE_DIR, strerror(errno));
+	snprintf(dir, sizeof(dir), "%s/%s", MFAKR_STATE_DIR, me->pw_name);
+	if (mkdir(dir, 0700) < 0 && errno != EEXIST)
+		die("cannot create %s: %s", dir, strerror(errno));
+	if (lstat(dir, &st) < 0 || !S_ISDIR(st.st_mode))
+		die("%s is not a directory", dir);
+	if (st.st_uid != me->pw_uid && chown(dir, me->pw_uid, me->pw_gid) < 0)
+		die("cannot chown %s: %s", dir, strerror(errno));
+	if (chmod(dir, 0700) < 0)
+		die("cannot chmod %s: %s", dir, strerror(errno));
+}
+
+static void require_root(const char *cmd)
+{
+	if (geteuid() != 0)
+		die("%s must run as root: sudo mfa-keyring %s", cmd, cmd);
+}
+
+static int cmd_zfs_enroll(void)
+{
+	struct mfakr_wrapfile wf;
+	struct zds ds;
+	uint8_t secret[MFAKR_SECRET_LEN];
+	char pw[MFAKR_PASSWORD_LEN + 1], prompt[512], *cur = NULL, *old_path;
+	int loaded = 0;
+
+	require_root("zfs-enroll");
+	load_or_die(&wf);
+	if (wf.zfs_dataset)
+		die("already enrolled for ZFS dataset %s", wf.zfs_dataset);
+	zfs_resolve(&wf, &ds);
+	if (mfakr_wf_count(&wf, MFAKR_SLOT_PASSWORD) == 0)
+		fprintf(stderr, "warning: no password slot, so password logins (console, SSH) "
+		        "will not be able to mount %s\n", ds.mountpoint);
+
+	recover_secret(&wf, secret, 1);
+	mfakr_secret_to_password(secret, pw);
+	sodium_memzero(secret, sizeof(secret));
+
+	if (strcmp(ds.keystatus, "available") != 0) {
+		snprintf(prompt, sizeof(prompt), "Current passphrase for %s "
+		         "(normally %s's login password): ", ds.name, me->pw_name);
+		cur = read_secret(prompt);
+		if (!cur)
+			die("no passphrase given");
+		loaded = zfs_ensure_loaded(&ds, cur);
+		mfakr_free_secret_str(cur);
+	}
+
+	/* The home is not mounted when pam_mfa_keyring needs the wrap file, so
+	 * it moves to the system location before the key changes. */
+	ensure_user_state_dir();
+	old_path = wrap_path;
+	wrap_path = system_path;
+	if (mfakr_wf_set_zfs(&wf, ds.name) < 0)
+		die("invalid dataset name");
+	save(&wf);
+
+	if (zfs_change_key(&ds, pw) != 0) {
+		if (strcmp(old_path, wrap_path) != 0) {
+			mfakr_unlink_user_file(wrap_path, me->pw_uid, me->pw_gid);
+		} else {
+			mfakr_wf_set_zfs(&wf, NULL);
+			save(&wf);
+		}
+		if (loaded)
+			zfs_unload(&ds);
+		die("zfs change-key failed; %s still uses its old passphrase", ds.name);
+	}
+	sodium_memzero(pw, sizeof(pw));
+	if (strcmp(old_path, wrap_path) != 0) {
+		int r = mfakr_unlink_user_file(old_path, me->pw_uid, me->pw_gid);
+		if (r < 0 && r != -ENOENT)
+			fprintf(stderr, "warning: could not remove %s: %s (it is no longer used)\n",
+			        old_path, strerror(-r));
+	}
+	if (loaded)
+		zfs_unload(&ds);
+	mfakr_wf_free(&wf);
+	printf("%s is now unlocked by the same secret as the keyring.\n"
+	       "Wrap file moved to %s.\n", ds.name, wrap_path);
+	return 0;
+}
+
+static int cmd_zfs_disenroll(void)
+{
+	struct mfakr_wrapfile wf;
+	struct zds ds;
+	uint8_t secret[MFAKR_SECRET_LEN];
+	char pw[MFAKR_PASSWORD_LEN + 1], what[512], *newpw;
+	int loaded;
+
+	require_root("zfs-disenroll");
+	load_or_die(&wf);
+	if (!wf.zfs_dataset)
+		die("not enrolled for ZFS");
+	zfs_resolve(&wf, &ds);
+
+	recover_secret(&wf, secret, 1);
+	mfakr_secret_to_password(secret, pw);
+	sodium_memzero(secret, sizeof(secret));
+	loaded = zfs_ensure_loaded(&ds, pw);
+	sodium_memzero(pw, sizeof(pw));
+
+	snprintf(what, sizeof(what), "passphrase for %s (normally %s's login password)",
+	         ds.name, me->pw_name);
+	newpw = read_new_password(what);
+	if (zfs_change_key(&ds, newpw) != 0) {
+		if (loaded)
+			zfs_unload(&ds);
+		die("zfs change-key failed; %s still uses the secret", ds.name);
+	}
+	mfakr_free_secret_str(newpw);
+	mfakr_wf_set_zfs(&wf, NULL);
+	save(&wf);
+	if (loaded)
+		zfs_unload(&ds);
+	mfakr_wf_free(&wf);
+	printf("%s now uses the passphrase you entered.\n", ds.name);
 	return 0;
 }
 
@@ -519,6 +776,9 @@ static void usage(FILE *f)
 	        "  remove N            Remove slot N\n"
 	        "  unlock              Unlock the running login keyring with a card or key\n"
 	        "  disenroll           Set a normal keyring password and delete the wrap file\n"
+	        "  zfs-enroll          (root) Make the secret the key of the user's encrypted ZFS\n"
+	        "                      home too, so card/key logins can mount it\n"
+	        "  zfs-disenroll       (root) Give the ZFS home an ordinary passphrase again\n"
 	        "\n"
 	        "Options:\n"
 	        "  --key ID            Card key to use: PKCS#11 id in hex (default 03, the PIV\n"
@@ -528,13 +788,15 @@ static void usage(FILE *f)
 	        "  --no-password-slot  enroll: don't let the login password unlock the keyring\n"
 	        "  --force             enroll: overwrite an existing wrap file\n"
 	        "  --module PATH       PKCS#11 module (default %s)\n"
-	        "  --file PATH         Wrap file (default %s)\n",
-	        DEFAULT_PKCS11_MODULE, DEFAULT_WRAP_FILE);
+	        "  --file PATH         Wrap file (default %s, else %s)\n"
+	        "  --user USER         (root) Work on USER's wrap file (default: $SUDO_USER)\n"
+	        "  --dataset NAME      zfs-enroll: the home dataset (default: mounted at the home)\n",
+	        DEFAULT_PKCS11_MODULE, DEFAULT_SYSTEM_WRAP_FILE, DEFAULT_WRAP_FILE);
 }
 
 int main(int argc, char **argv)
 {
-	enum { O_KEY = 256, O_FIDO2, O_UV, O_NOPW, O_FORCE, O_MODULE, O_FILE };
+	enum { O_KEY = 256, O_FIDO2, O_UV, O_NOPW, O_FORCE, O_MODULE, O_FILE, O_USER, O_DATASET };
 	static const struct option longopts[] = {
 		{ "key", required_argument, NULL, O_KEY },
 		{ "fido2", no_argument, NULL, O_FIDO2 },
@@ -543,6 +805,8 @@ int main(int argc, char **argv)
 		{ "force", no_argument, NULL, O_FORCE },
 		{ "module", required_argument, NULL, O_MODULE },
 		{ "file", required_argument, NULL, O_FILE },
+		{ "user", required_argument, NULL, O_USER },
+		{ "dataset", required_argument, NULL, O_DATASET },
 		{ "help", no_argument, NULL, 'h' },
 		{ "version", no_argument, NULL, 'V' },
 		{ 0 }
@@ -559,6 +823,8 @@ int main(int argc, char **argv)
 		case O_FORCE: opt_force = 1; break;
 		case O_MODULE: opt_module = optarg; break;
 		case O_FILE: opt_file = optarg; break;
+		case O_USER: opt_user = optarg; break;
+		case O_DATASET: opt_dataset = optarg; break;
 		case 'h': usage(stdout); return 0;
 		case 'V': printf("mfa-keyring %s\n", PACKAGE_VERSION); return 0;
 		default: usage(stderr); return 2;
@@ -572,13 +838,43 @@ int main(int argc, char **argv)
 
 	if (mfakr_crypto_init() < 0)
 		die("cannot initialise libsodium");
-	me = getpwuid(getuid());
+	if (!opt_user && geteuid() == 0 && strncmp(cmd, "zfs-", 4) == 0)
+		opt_user = getenv("SUDO_USER");
+	if (opt_user) {
+		if (geteuid() != 0 && strcmp(opt_user, getpwuid(getuid())->pw_name) != 0)
+			die("--user needs root");
+		me = getpwnam(opt_user);
+	} else {
+		me = getpwuid(getuid());
+	}
 	if (!me)
-		die("cannot look up current user");
-	wrap_path = mfakr_expand_path(opt_file ? opt_file : DEFAULT_WRAP_FILE,
-	                              me->pw_name, me->pw_dir);
-	if (!wrap_path)
-		die("invalid --file path");
+		die("cannot look up user %s", opt_user ? opt_user : "");
+	if (me->pw_uid != getuid() && (strcmp(cmd, "enroll") == 0 || strcmp(cmd, "unlock") == 0 ||
+	                               strcmp(cmd, "disenroll") == 0))
+		die("%s talks to the user's keyring; run it as %s", cmd, me->pw_name);
+	if (me->pw_uid == 0 && strncmp(cmd, "zfs-", 4) == 0)
+		die("which user? use --user or run through sudo");
+
+	system_path = mfakr_expand_path(DEFAULT_SYSTEM_WRAP_FILE, me->pw_name, me->pw_dir);
+	home_path = mfakr_expand_path(DEFAULT_WRAP_FILE, me->pw_name, me->pw_dir);
+	if (!system_path || !home_path)
+		die("cannot build wrap file paths");
+	if (opt_file) {
+		wrap_path = mfakr_expand_path(opt_file, me->pw_name, me->pw_dir);
+		if (!wrap_path)
+			die("invalid --file path");
+	} else {
+		/* Same order as pam_mfa_keyring.  New enrolments go to the system
+		 * location only if an administrator created the user's directory. */
+		char *dir = strdup(system_path);
+		struct stat st;
+
+		wrap_path = home_path;
+		if (dir && (lstat(system_path, &st) == 0 ||
+		            (lstat(dirname(dir), &st) == 0 && S_ISDIR(st.st_mode))))
+			wrap_path = system_path;
+		free(dir);
+	}
 
 	if (strcmp(cmd, "status") == 0)
 		return cmd_status();
@@ -601,6 +897,10 @@ int main(int argc, char **argv)
 		return cmd_unlock();
 	if (strcmp(cmd, "disenroll") == 0)
 		return cmd_disenroll();
+	if (strcmp(cmd, "zfs-enroll") == 0)
+		return cmd_zfs_enroll();
+	if (strcmp(cmd, "zfs-disenroll") == 0)
+		return cmd_zfs_disenroll();
 	usage(stderr);
 	return 2;
 }

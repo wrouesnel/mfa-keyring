@@ -1,6 +1,6 @@
 .TH MFA-KEYRING 1 "2026-10-02" "mfa-keyring" "User Commands"
 .SH NAME
-mfa-keyring \- unlock the GNOME login keyring with a PIV card or FIDO2 key
+mfa-keyring \- unlock the GNOME keyring and ZFS home with a PIV card or FIDO2 key
 .SH SYNOPSIS
 .B mfa-keyring
 .RI [ options ]
@@ -8,8 +8,10 @@ mfa-keyring \- unlock the GNOME login keyring with a PIV card or FIDO2 key
 .SH DESCRIPTION
 .B mfa-keyring enroll
 changes the login keyring password to a random 256-bit secret and stores that
-secret in
-.I ~/.local/share/mfa-keyring/login.wrap,
+secret in a wrap file
+.RI ( /var/lib/mfa-keyring/ user /login.wrap
+if that directory exists, otherwise
+.IR ~/.local/share/mfa-keyring/login.wrap ),
 sealed to a PIV card key (default: the key management key, PKCS#11 id 03) or,
 with
 .BR \-\-fido2 ,
@@ -45,6 +47,15 @@ Unlock the running login keyring with a card or security key.
 .TP
 .B disenroll
 Set an ordinary keyring password and delete the wrap file.
+.TP
+.B zfs-enroll
+(root) Change the passphrase of the user's encrypted ZFS home (its own
+encryption root, keyformat=passphrase) to the secret, and move the wrap file to
+/var/lib/mfa-keyring/\fIuser\fR/ so it is readable before the home is mounted.
+Smartcard and FIDO2 logins can then mount the home through pam_zfs_key.
+.TP
+.B zfs-disenroll
+(root) Give the ZFS home an ordinary passphrase again.
 .SH OPTIONS
 .TP
 .BI \-\-key " ID"
@@ -67,5 +78,12 @@ PKCS#11 module.
 .TP
 .BI \-\-file " PATH"
 Wrap file.
+.TP
+.BI \-\-user " USER"
+(root) Work on another user's wrap file.  zfs-enroll and zfs-disenroll default
+to $SUDO_USER.
+.TP
+.BI \-\-dataset " NAME"
+zfs-enroll: the home dataset (default: the one mounted at the user's home).
 .SH SEE ALSO
 .BR pam_mfa_keyring (8)

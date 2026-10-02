@@ -53,5 +53,8 @@ int mfakr_read_user_file(const char *path, uid_t uid, gid_t gid,
 int mfakr_write_user_file(const char *path, uid_t uid, gid_t gid,
                           const char *data, size_t len);
 
+/* Unlink path using the filesystem credentials of uid/gid when root. */
+int mfakr_unlink_user_file(const char *path, uid_t uid, gid_t gid);
+
 void mfakr_memzero(void *p, size_t len);
 void mfakr_free_secret_str(char *s);

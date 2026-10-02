@@ -45,6 +45,30 @@ static void test_wf_roundtrip(void **state)
 	mfakr_wf_free(&wf);
 }
 
+static void test_wf_zfs(void **state)
+{
+	static const char *const in =
+		"mfa-keyring-wrap 1 alice\n"
+		"zfs rpool/home/alice\n"
+		"password argon2id 3 268435456 salt nonce ct\n";
+	static const char *const dup = "mfa-keyring-wrap 1 alice\nzfs a\nzfs b\n";
+	struct mfakr_wrapfile wf;
+	char *out;
+
+	assert_int_equal(mfakr_wf_parse(in, strlen(in), &wf), 0);
+	assert_string_equal(wf.zfs_dataset, "rpool/home/alice");
+	assert_int_equal(wf.nslots, 1);
+	out = mfakr_wf_serialize(&wf);
+	assert_string_equal(out, in);
+	free(out);
+	assert_int_equal(mfakr_wf_set_zfs(&wf, NULL), 0);
+	out = mfakr_wf_serialize(&wf);
+	assert_null(strstr(out, "zfs"));
+	free(out);
+	mfakr_wf_free(&wf);
+	assert_int_not_equal(mfakr_wf_parse(dup, strlen(dup), &wf), 0);
+}
+
 static void test_wf_rejects(void **state)
 {
 	static const char *const bad[] = {
@@ -220,6 +244,7 @@ int main(void)
 {
 	const struct CMUnitTest tests[] = {
 		cmocka_unit_test(test_wf_roundtrip),
+		cmocka_unit_test(test_wf_zfs),
 		cmocka_unit_test(test_wf_rejects),
 		cmocka_unit_test(test_expand_path),
 		cmocka_unit_test(test_secret_password),

@@ -33,7 +33,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
          libpam-gnome-keyring,
          opensc-pkcs11
 Recommends: mfa-keyring, sssd
-Suggests: libpam-u2f
+Suggests: libpam-u2f, libpam-zfs
 Description: unlock the GNOME keyring after smartcard or security key login
  PAM module that unlocks the GNOME login keyring when you log in to GDM with
  a PIV smartcard (through SSSD), passwordlessly with a FIDO2 security key
@@ -44,8 +44,11 @@ Description: unlock the GNOME keyring after smartcard or security key login
  a FIDO2 security key (hmac-secret extension) and to your login password
  (Argon2id).
  .
- Installs a gdm-smartcard PAM stack as the preferred alternative and a
- pam-auth-update profile.  Enrol with mfa-keyring.
+ Optionally the same secret becomes the key of the user's encrypted ZFS home,
+ so pam_zfs_key can mount it after smartcard and security-key logins too.
+ .
+ Installs a gdm-smartcard PAM stack as the preferred alternative and two
+ pam-auth-update profiles.  Enrol with mfa-keyring.
 
 Package: mfa-keyring
 Architecture: any
@@ -53,8 +56,8 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
          opensc-pkcs11,
          gnome-keyring
 Recommends: libpam-mfa-keyring
-Description: enrol PIV smartcards and FIDO2 keys to unlock the GNOME keyring
+Description: enrol smartcards and FIDO2 keys to unlock the GNOME keyring and ZFS home
  Command line tool to enrol PIV smartcard keys, FIDO2 security keys and the
- login password as ways to unlock the GNOME login keyring.  It re-keys the
- login keyring to a random secret and writes the wrap file that
- pam_mfa_keyring uses at login.
+ login password as ways to unlock the GNOME login keyring (and optionally an
+ encrypted ZFS home).  It re-keys them to a random secret and writes the wrap
+ file that pam_mfa_keyring uses at login.

@@ -5,7 +5,17 @@ if [ "$1" = remove ] || [ "$1" = deconfigure ]; then
 	update-alternatives --remove gdm-smartcard /etc/pam.d/gdm-smartcard-sssd-mfa-keyring
 fi
 if [ "$1" = remove ]; then
-	pam-auth-update --package --remove mfa-keyring
+	# Users whose ZFS home key is the secret can't mount it with their
+	# password once this module is gone.
+	zfs_users=$(grep -l '^zfs ' /var/lib/mfa-keyring/*/login.wrap 2>/dev/null |
+		sed 's|.*/mfa-keyring/\([^/]*\)/login.wrap|\1|' | tr '\n' ' ')
+	if [ -n "$zfs_users" ]; then
+		echo "WARNING: the encrypted ZFS homes of these users are keyed to their" >&2
+		echo "mfa-keyring secret: $zfs_users" >&2
+		echo "Without this module, password logins cannot mount them. Reinstall, or run" >&2
+		echo "'mfa-keyring zfs-disenroll --user USER' (from the mfa-keyring package) first." >&2
+	fi
+	pam-auth-update --package --remove mfa-keyring mfa-keyring-early
 fi
 
 #DEBHELPER#

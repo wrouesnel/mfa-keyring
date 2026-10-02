@@ -1,4 +1,5 @@
 usr/lib/*/security/pam_mfa_keyring.so
 usr/share/pam-configs/mfa-keyring
+usr/share/pam-configs/mfa-keyring-early
 etc/pam.d/gdm-smartcard-sssd-mfa-keyring
 usr/share/man/man8/pam_mfa_keyring.8

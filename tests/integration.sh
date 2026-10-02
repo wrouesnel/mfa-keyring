@@ -195,6 +195,7 @@ ok "mode=piv prompt_pin asks for the PIN when none was forwarded"
 mkstack() { # mkstack NAME SSS_REPLACEMENT
 	sed -e "s|pam_sss.so|$2|" \
 	    -e "s|pam_mfa_keyring.so mode=piv|$MOD mode=piv $OPTS|" \
+	    -e "s|pam_zfs_key.so|$GET|" -e "s|pam_permit.so|$PAM_MODULES/pam_permit.so|" \
 	    -e "s|pam_gnome_keyring.so|$GET|" \
 	    -e "s|substack        common-auth|substack        $1-common|" \
 	    -e '/^@include/d' -e '/^session/d' -e '/^account/d' -e '/^password/d' \
@@ -257,6 +258,64 @@ $CLI list-keys > "$T/keys.txt"
 printf '%s\n654321\n' "$PIN" | $CLI add-piv --key "$(grep -A1 other-card "$T/keys.txt" | sed -n 's/.*keyid //p' | head -c 16)" \
 	>"$T/out" 2>&1 || { cat "$T/out"; fail "add-piv second card"; }
 ok "a second card can be added as a backup"
+
+# ------------------------------------------------- ZFS home + file list ---
+LOGIN_PW=recovered-pw
+ZW=$T/zfs.wrap
+sed '1a zfs rpool/home/'"$USER_NAME" "$T/login.wrap" > "$ZW"; chmod 600 "$ZW"
+cat > "$SVC/early" <<EOF
+auth required $SET
+auth optional $MOD mode=login zfs_only skip_if=sudo file=$T/missing.wrap file=$ZW module=$SOFTHSM_MODULE
+auth required $GET
+EOF
+sed "s|file=$ZW|file=$T/login.wrap|" "$SVC/early" > "$SVC/early-nozfs"
+TOK=$(pamrun auth early PAM_AUTHTOK=$LOGIN_PW 2>/dev/null | authtok_of)
+[ "$TOK" = "$SECRET" ] || fail "zfs_only instance for a ZFS-enrolled user (got '$TOK')"
+ok "file search skips a missing location; zfs_only hands a ZFS user the secret"
+TOK=$(pamrun auth early-nozfs PAM_AUTHTOK=$LOGIN_PW 2>/dev/null | authtok_of)
+[ "$TOK" = "$LOGIN_PW" ] || fail "zfs_only must not touch non-ZFS users"
+ok "zfs_only leaves PAM_AUTHTOK alone for users without a ZFS home"
+
+sed 's/skip_if=sudo/skip_if=early-skipped,sudo/' "$SVC/early" > "$SVC/early-skipped"
+TOK=$(pamrun auth early-skipped PAM_AUTHTOK=$LOGIN_PW 2>/dev/null | authtok_of)
+[ "$TOK" = "$LOGIN_PW" ] || fail "skip_if"
+ok "skip_if excludes listed services"
+
+# Early + late instance as the two pam-auth-update profiles produce them.
+cat > "$SVC/both" <<EOF
+auth required $SET
+auth optional $MOD mode=login zfs_only file=$ZW module=$SOFTHSM_MODULE
+auth optional $MOD mode=login file=$ZW module=$SOFTHSM_MODULE
+auth required $GET
+EOF
+TOK=$(pamrun auth both PAM_AUTHTOK=$LOGIN_PW 2>/dev/null | authtok_of)
+[ "$TOK" = "$SECRET" ] || fail "early+late stack"
+ok "early and late instances together still yield the secret"
+
+# Password change: ZFS users hand the secret on to pam_zfs_key, others don't.
+cat > "$SVC/passwd-zfs" <<EOF
+password required $SET
+password optional $MOD file=$ZW module=$SOFTHSM_MODULE
+password required $GET
+EOF
+TOK=$(pamrun chauthtok passwd-zfs PAM_OLDAUTHTOK=$LOGIN_PW PAM_AUTHTOK=zfs-new-pw 2>/dev/null | authtok_of)
+[ "$TOK" = "$SECRET" ] || fail "chauthtok for a ZFS user must pass the secret on (got '$TOK')"
+TOK=$(pamrun auth early PAM_AUTHTOK=zfs-new-pw 2>/dev/null | authtok_of)
+[ "$TOK" = "$SECRET" ] || fail "new password after ZFS chauthtok"
+ok "password change for a ZFS user re-wraps the slot and passes the secret to pam_zfs_key"
+TOK=$(pamrun chauthtok passwd PAM_OLDAUTHTOK=$LOGIN_PW PAM_AUTHTOK=plain-new-pw 2>/dev/null | authtok_of)
+[ "$TOK" = plain-new-pw ] || fail "chauthtok for a non-ZFS user must leave PAM_AUTHTOK alone"
+pamrun chauthtok passwd PAM_OLDAUTHTOK=plain-new-pw PAM_AUTHTOK=$LOGIN_PW >/dev/null 2>&1
+ok "password change for a non-ZFS user leaves the new password in place"
+
+ZCLI="$BUILD/mfa-keyring --module $SOFTHSM_MODULE --file $ZW"
+$ZCLI status 2>/dev/null | grep -q "ZFS home: rpool/home" || fail "status shows the ZFS home"
+printf '%s\nx\nx\n' "$PIN" | $ZCLI disenroll >"$T/out" 2>&1 &&
+	fail "disenroll must refuse while the ZFS home uses the secret"
+grep -q zfs-disenroll "$T/out" || fail "disenroll message"
+$GKR lock
+$GKR unlock "$SECRET" || fail "refused disenroll must not touch the keyring"
+ok "disenroll refuses (before touching the keyring) while a ZFS home uses the secret"
 
 # ------------------------------------------------------------ hardening ---
 cp "$T/login.wrap" "$T/good.wrap"

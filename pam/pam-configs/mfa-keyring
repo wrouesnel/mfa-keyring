@@ -1,9 +1,6 @@
-Name: Unlock GNOME keyring from password or FIDO2 key (mfa-keyring)
+Name: MFA keyring: unlock the GNOME keyring from password or FIDO2 key
 Default: yes
 Priority: -128
 Auth-Type: Additional
 Auth:
 	optional	pam_mfa_keyring.so mode=login only_if=gdm-password,gdm-smartcard
-Password-Type: Additional
-Password:
-	optional	pam_mfa_keyring.so

@@ -38,7 +38,24 @@ void mfakr_wf_free(struct mfakr_wrapfile *wf)
 	for (int i = 0; i < wf->nslots; i++)
 		slot_free(&wf->slots[i]);
 	free(wf->user);
+	free(wf->zfs_dataset);
 	memset(wf, 0, sizeof(*wf));
+}
+
+int mfakr_wf_set_zfs(struct mfakr_wrapfile *wf, const char *dataset)
+{
+	char *copy = NULL;
+
+	if (dataset) {
+		if (!mfakr_wf_valid_token(dataset))
+			return -EINVAL;
+		copy = strdup(dataset);
+		if (!copy)
+			return -ENOMEM;
+	}
+	free(wf->zfs_dataset);
+	wf->zfs_dataset = copy;
+	return 0;
 }
 
 int mfakr_wf_add_slot(struct mfakr_wrapfile *wf, const char *type,
@@ -138,6 +155,11 @@ int mfakr_wf_parse(const char *data, size_t len, struct mfakr_wrapfile *wf)
 			first = 0;
 			continue;
 		}
+		if (strcmp(tok[0], "zfs") == 0) {
+			if (n != 2 || wf->zfs_dataset || mfakr_wf_set_zfs(wf, tok[1]) < 0)
+				goto fail;
+			continue;
+		}
 		if (mfakr_wf_add_slot(wf, tok[0], n - 1, (const char *const *) &tok[1]) < 0)
 			goto fail;
 	}
@@ -160,6 +182,8 @@ char *mfakr_wf_serialize(const struct mfakr_wrapfile *wf)
 	if (!f)
 		return NULL;
 	fprintf(f, "%s %d %s\n", MFAKR_WF_MAGIC, MFAKR_WF_VERSION, wf->user);
+	if (wf->zfs_dataset)
+		fprintf(f, "zfs %s\n", wf->zfs_dataset);
 	for (int i = 0; i < wf->nslots; i++) {
 		const struct mfakr_slot *s = &wf->slots[i];
 		fputs(s->type, f);

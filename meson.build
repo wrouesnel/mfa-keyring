@@ -29,6 +29,9 @@ p11kit_headers = p11kit.partial_dependency(compile_args : true, includes : true)
 conf = configuration_data()
 conf.set_quoted('PACKAGE_VERSION', meson.project_version())
 conf.set_quoted('DEFAULT_PKCS11_MODULE', get_option('default_pkcs11_module'))
+statedir = get_option('prefix') / get_option('localstatedir') / 'lib' / 'mfa-keyring'
+conf.set_quoted('MFAKR_STATE_DIR', statedir)
+conf.set_quoted('DEFAULT_SYSTEM_WRAP_FILE', statedir / '%u' / 'login.wrap')
 conf.set_quoted('DEFAULT_WRAP_FILE', '%h/.local/share/mfa-keyring/login.wrap')
 conf.set10('HAVE_FIDO2', libfido2.found())
 configure_file(output : 'config.h', configuration : conf)
@@ -76,7 +79,7 @@ if glib.found()
     install : true)
 endif
 
-install_data('pam/pam-configs/mfa-keyring',
+install_data('pam/pam-configs/mfa-keyring', 'pam/pam-configs/mfa-keyring-early',
   install_dir : get_option('datadir') / 'pam-configs')
 install_data('pam/gdm-smartcard-sssd-mfa-keyring',
   install_dir : get_option('sysconfdir') / 'pam.d')

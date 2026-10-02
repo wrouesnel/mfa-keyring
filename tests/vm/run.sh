@@ -8,6 +8,7 @@
 #
 # CLOUD_IMAGE defaults to noble-server-cloudimg-amd64.img in the current
 # directory.  Prints the VMTEST lines and exits non-zero on any failure.
+# Set KEEP_CONSOLE=FILE to keep the full console log.
 set -euo pipefail
 
 DEBS=$(realpath "$1")
@@ -23,7 +24,7 @@ cp "$DEBS"/libpam-mfa-keyring_*.deb "$DEBS"/mfa-keyring_*.deb "$HERE/vmtest.sh" 
 cp "$HERE/user-data" "$W/user-data"
 printf 'instance-id: %s\nlocal-hostname: mfakr-test\n' "$NAME" > "$W/meta-data"
 cloud-localds "$W/seed.iso" "$W/user-data" "$W/meta-data"
-genisoimage -quiet -V PIVTEST -r -J -o "$W/payload.iso" "$W/payload"
+genisoimage -quiet -V MFATEST -r -J -o "$W/payload.iso" "$W/payload"
 qemu-img create -q -f qcow2 -F qcow2 -b "$IMAGE" "$W/disk.qcow2" 12G
 
 virt-install --connect qemu:///session --name "$NAME" --memory 2048 --vcpus 2 \
@@ -39,5 +40,6 @@ until grep -aq "VMTEST DONE" "$W/console.log" 2>/dev/null; do
 	[ $SECONDS -lt $deadline ] || { echo "timed out"; exit 1; }
 	sleep 5
 done
+[ -n "${KEEP_CONSOLE:-}" ] && cp "$W/console.log" "$KEEP_CONSOLE"
 grep -a "VMTEST" "$W/console.log" | sed 's/^\[ *[0-9.]*\] cloud-init\[[0-9]*\]: //' | grep -a '^VMTEST'
 grep -aq "VMTEST DONE pass=[0-9]* fail=0" "$W/console.log"
