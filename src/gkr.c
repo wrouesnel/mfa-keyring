@@ -108,17 +108,17 @@ out:
 	return r;
 }
 
-int pivkr_gkr_change_password(const char *oldpw, const char *newpw, char **err)
+int mfakr_gkr_change_password(const char *oldpw, const char *newpw, char **err)
 {
 	return call_internal("ChangeWithMasterPassword", oldpw, newpw, err);
 }
 
-int pivkr_gkr_unlock(const char *password, char **err)
+int mfakr_gkr_unlock(const char *password, char **err)
 {
 	return call_internal("UnlockWithMasterPassword", password, NULL, err);
 }
 
-int pivkr_gkr_is_locked(char **err)
+int mfakr_gkr_is_locked(char **err)
 {
 	GDBusConnection *bus;
 	GError *e = NULL;

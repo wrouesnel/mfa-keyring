@@ -1,4 +1,4 @@
-# piv-keyring
+# mfa-keyring
 
 Unlock the GNOME login keyring on Ubuntu when you log in to GDM with a **PIV
 smartcard** (via SSSD), **passwordlessly with a FIDO2 security key** (via
@@ -19,7 +19,7 @@ prompts for it after login. The common workarounds are weak:
 ## Design
 
 The login keyring password is replaced by a **random 256-bit secret**. The
-secret is stored in `~/.local/share/piv-keyring/login.wrap`, sealed
+secret is stored in `~/.local/share/mfa-keyring/login.wrap`, sealed
 (XChaCha20-Poly1305) once per enrolled unlock method ("slot"), much like LUKS
 keyslots:
 
@@ -34,20 +34,20 @@ The header (including the user name) and each slot's parameters are
 authenticated as AEAD associated data. Card keys are identified by the SHA-256
 of their SubjectPublicKeyInfo, and that keyid is also bound into the KDF.
 
-At login, `pam_piv_keyring.so` recovers the secret and replaces `PAM_AUTHTOK`
+At login, `pam_mfa_keyring.so` recovers the secret and replaces `PAM_AUTHTOK`
 with it, just before `pam_gnome_keyring.so`, which then unlocks the keyring as
 usual. No changes to gnome-keyring are needed.
 
 ### Login flows
 
 **Smartcard (gdm-smartcard).** The package installs
-`/etc/pam.d/gdm-smartcard-sssd-piv-keyring` as the highest-priority
+`/etc/pam.d/gdm-smartcard-sssd-mfa-keyring` as the highest-priority
 `gdm-smartcard` alternative. It is Ubuntu's `gdm-smartcard-sssd-exclusive`
 with two changes:
 
 1. `pam_sss ... forward_pass`, so that the PIN SSSD just verified is put in
    `PAM_AUTHTOK`.
-2. `pam_piv_keyring.so mode=piv` runs **straight after pam_sss** and uses that
+2. `pam_mfa_keyring.so mode=piv` runs **straight after pam_sss** and uses that
    PIN to unwrap the secret on the card.
 
 The PIN is never allowed to reach `pam_gnome_keyring`. If that happened,
@@ -65,7 +65,7 @@ retry. Two things prevent it:
   range. A wrong PIN is tried at most once.
 
 **Password (gdm-password, and the gdm-smartcard fallback).** A pam-auth-update
-profile adds `pam_piv_keyring.so mode=login` as the **last** module in
+profile adds `pam_mfa_keyring.so mode=login` as the **last** module in
 `common-auth`, limited to GDM with `only_if`. Running last means modules that
 need the real password, such as `pam_zfs_key`, still see it. The module turns
 the password into the secret through the password slot.
@@ -83,7 +83,7 @@ password, the password slot is used and there is no extra touch.
 slot with the new password, using `PAM_OLDAUTHTOK` and `PAM_AUTHTOK` from
 pam_unix. If an administrator resets the password, there is no old password,
 so the slot goes stale. The module logs this, and the user runs
-`piv-keyring set-password` with their card.
+`mfa-keyring set-password` with their card.
 
 ### Security properties
 
@@ -107,9 +107,9 @@ so the slot goes stale. The module logs this, and the user runs
 
 ## Packages
 
-- `libpam-piv-keyring`: the PAM module, the gdm-smartcard stack (an alternative,
+- `libpam-mfa-keyring`: the PAM module, the gdm-smartcard stack (an alternative,
   priority 60) and the pam-auth-update profile.
-- `piv-keyring`: the enrolment tool.
+- `mfa-keyring`: the enrolment tool.
 
 Build with `dpkg-buildpackage -us -uc -b`. The tests use SoftHSM as the card,
 pam_wrapper to run PAM stacks unprivileged, and a real gnome-keyring-daemon
@@ -119,15 +119,15 @@ on a private D-Bus.
 
 1. Configure SSSD smartcard login for GDM (certificate mapping for your
    users). See the Ubuntu Server guide, "Smart card authentication".
-2. Install `libpam-piv-keyring` and `piv-keyring`.
+2. Install `libpam-mfa-keyring` and `mfa-keyring`.
 3. As the user, with the card inserted:
 
    ```
-   piv-keyring list-keys
-   piv-keyring enroll                 # uses the PIV key-management key (9d / id 03)
-   piv-keyring add-piv --key <keyid>  # optional: backup card
-   piv-keyring add-fido2 --uv         # optional: FIDO2 key for pam_u2f logins
-   piv-keyring status
+   mfa-keyring list-keys
+   mfa-keyring enroll                 # uses the PIV key-management key (9d / id 03)
+   mfa-keyring add-piv --key <keyid>  # optional: backup card
+   mfa-keyring add-fido2 --uv         # optional: FIDO2 key for pam_u2f logins
+   mfa-keyring status
    ```
 
 The key-management slot (9d) must hold an EC (P-256/P-384) or RSA key. For

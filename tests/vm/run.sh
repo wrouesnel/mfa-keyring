@@ -13,15 +13,15 @@ set -euo pipefail
 DEBS=$(realpath "$1")
 IMAGE=$(realpath "${2:-noble-server-cloudimg-amd64.img}")
 HERE=$(dirname "$(realpath "$0")")
-NAME=pivkr-vmtest-$$
+NAME=mfakr-vmtest-$$
 VIRSH="virsh -c qemu:///session"
 W=$(mktemp -d)
 trap '$VIRSH destroy $NAME >/dev/null 2>&1 || true; $VIRSH undefine $NAME >/dev/null 2>&1 || true; rm -rf "$W"' EXIT
 
 mkdir "$W/payload"
-cp "$DEBS"/libpam-piv-keyring_*.deb "$DEBS"/piv-keyring_*.deb "$HERE/vmtest.sh" "$W/payload/"
+cp "$DEBS"/libpam-mfa-keyring_*.deb "$DEBS"/mfa-keyring_*.deb "$HERE/vmtest.sh" "$W/payload/"
 cp "$HERE/user-data" "$W/user-data"
-printf 'instance-id: %s\nlocal-hostname: pivkr-test\n' "$NAME" > "$W/meta-data"
+printf 'instance-id: %s\nlocal-hostname: mfakr-test\n' "$NAME" > "$W/meta-data"
 cloud-localds "$W/seed.iso" "$W/user-data" "$W/meta-data"
 genisoimage -quiet -V PIVTEST -r -J -o "$W/payload.iso" "$W/payload"
 qemu-img create -q -f qcow2 -F qcow2 -b "$IMAGE" "$W/disk.qcow2" 12G

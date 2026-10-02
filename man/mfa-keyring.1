@@ -1,21 +1,21 @@
-.TH PIV-KEYRING 1 "2026-10-02" "piv-keyring" "User Commands"
+.TH MFA-KEYRING 1 "2026-10-02" "mfa-keyring" "User Commands"
 .SH NAME
-piv-keyring \- unlock the GNOME login keyring with a PIV card or FIDO2 key
+mfa-keyring \- unlock the GNOME login keyring with a PIV card or FIDO2 key
 .SH SYNOPSIS
-.B piv-keyring
+.B mfa-keyring
 .RI [ options ]
 .I command
 .SH DESCRIPTION
-.B piv-keyring enroll
+.B mfa-keyring enroll
 changes the login keyring password to a random 256-bit secret and stores that
 secret in
-.I ~/.local/share/piv-keyring/login.wrap,
+.I ~/.local/share/mfa-keyring/login.wrap,
 sealed to a PIV card key (default: the key management key, PKCS#11 id 03) or,
 with
 .BR \-\-fido2 ,
 to a FIDO2 security key, and also to your login password so that password logins
 keep working.
-.BR pam_piv_keyring (8)
+.BR pam_mfa_keyring (8)
 recovers the secret at login.
 .SH COMMANDS
 .TP
@@ -68,4 +68,4 @@ PKCS#11 module.
 .BI \-\-file " PATH"
 Wrap file.
 .SH SEE ALSO
-.BR pam_piv_keyring (8)
+.BR pam_mfa_keyring (8)

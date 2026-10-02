@@ -1,5 +1,5 @@
 option('cli', type : 'feature', value : 'enabled',
-  description : 'Build the piv-keyring enrolment tool (needs GIO)')
+  description : 'Build the mfa-keyring enrolment tool (needs GIO)')
 option('fido2', type : 'feature', value : 'auto',
   description : 'Support FIDO2 hmac-secret slots (pam_u2f setups)')
 option('default_pkcs11_module', type : 'string',

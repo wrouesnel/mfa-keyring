@@ -17,7 +17,7 @@
 #define MAX_SLOTS 16
 #define MAX_OBJECTS 64
 
-int pivkr_p11_open(const char *module, struct pivkr_p11 *p)
+int mfakr_p11_open(const char *module, struct mfakr_p11 *p)
 {
 	CK_C_GetFunctionList getfl;
 	CK_C_INITIALIZE_ARGS args;
@@ -26,12 +26,12 @@ int pivkr_p11_open(const char *module, struct pivkr_p11 *p)
 	memset(p, 0, sizeof(*p));
 	p->dl = dlopen(module, RTLD_NOW | RTLD_LOCAL);
 	if (!p->dl) {
-		pivkr_log(LOG_ERR, "cannot load PKCS#11 module %s: %s", module, dlerror());
+		mfakr_log(LOG_ERR, "cannot load PKCS#11 module %s: %s", module, dlerror());
 		return -ENOENT;
 	}
 	getfl = (CK_C_GetFunctionList) dlsym(p->dl, "C_GetFunctionList");
 	if (!getfl || getfl(&p->f) != CKR_OK) {
-		pivkr_log(LOG_ERR, "%s is not a PKCS#11 module", module);
+		mfakr_log(LOG_ERR, "%s is not a PKCS#11 module", module);
 		dlclose(p->dl);
 		p->dl = NULL;
 		return -EINVAL;
@@ -43,7 +43,7 @@ int pivkr_p11_open(const char *module, struct pivkr_p11 *p)
 	if (rv == CKR_OK) {
 		p->finalize = 1;
 	} else if (rv != CKR_CRYPTOKI_ALREADY_INITIALIZED) {
-		pivkr_log(LOG_ERR, "C_Initialize failed: 0x%lx", rv);
+		mfakr_log(LOG_ERR, "C_Initialize failed: 0x%lx", rv);
 		dlclose(p->dl);
 		p->dl = NULL;
 		return -EIO;
@@ -51,7 +51,7 @@ int pivkr_p11_open(const char *module, struct pivkr_p11 *p)
 	return 0;
 }
 
-void pivkr_p11_close(struct pivkr_p11 *p)
+void mfakr_p11_close(struct mfakr_p11 *p)
 {
 	if (p->finalize)
 		p->f->C_Finalize(NULL);
@@ -61,7 +61,7 @@ void pivkr_p11_close(struct pivkr_p11 *p)
 }
 
 /* Fetch a variable-length attribute into a malloc'd buffer. */
-static int get_attr(struct pivkr_p11 *p, CK_SESSION_HANDLE s, CK_OBJECT_HANDLE o,
+static int get_attr(struct mfakr_p11 *p, CK_SESSION_HANDLE s, CK_OBJECT_HANDLE o,
                     CK_ATTRIBUTE_TYPE type, uint8_t **out, size_t *len)
 {
 	CK_ATTRIBUTE a = { type, NULL, 0 };
@@ -82,7 +82,7 @@ static int get_attr(struct pivkr_p11 *p, CK_SESSION_HANDLE s, CK_OBJECT_HANDLE o
 	return 0;
 }
 
-static int find_objects(struct pivkr_p11 *p, CK_SESSION_HANDLE s,
+static int find_objects(struct mfakr_p11 *p, CK_SESSION_HANDLE s,
                         CK_ATTRIBUTE *tmpl, CK_ULONG n,
                         CK_OBJECT_HANDLE *objs, CK_ULONG max, CK_ULONG *count)
 {
@@ -122,7 +122,7 @@ static EVP_PKEY *pkey_from_params(OSSL_PARAM_BLD *bld, const char *type)
 	return pk;
 }
 
-static EVP_PKEY *pkey_from_pubkey_object(struct pivkr_p11 *p, CK_SESSION_HANDLE s,
+static EVP_PKEY *pkey_from_pubkey_object(struct mfakr_p11 *p, CK_SESSION_HANDLE s,
                                          CK_OBJECT_HANDLE o)
 {
 	CK_KEY_TYPE kt;
@@ -201,12 +201,12 @@ static void copy_padded(char *dst, size_t dstlen, const unsigned char *src, size
 	dst[n] = '\0';
 }
 
-static int add_key(struct pivkr_p11_key **keys, int *n, CK_SLOT_ID slot,
+static int add_key(struct mfakr_p11_key **keys, int *n, CK_SLOT_ID slot,
                    const CK_TOKEN_INFO *ti, const uint8_t *id, size_t idlen,
                    const uint8_t *label, size_t labellen, EVP_PKEY *pk)
 {
-	struct pivkr_p11_key *k, *nk;
-	char *keyid = pivkr_spki_keyid(pk);
+	struct mfakr_p11_key *k, *nk;
+	char *keyid = mfakr_spki_keyid(pk);
 	int type = EVP_PKEY_get_base_id(pk);
 
 	if (!keyid || (type != EVP_PKEY_EC && type != EVP_PKEY_RSA) || idlen > sizeof(k->id)) {
@@ -241,8 +241,8 @@ static int add_key(struct pivkr_p11_key **keys, int *n, CK_SLOT_ID slot,
 	return 0;
 }
 
-static int list_slot_keys(struct pivkr_p11 *p, CK_SLOT_ID slot,
-                          struct pivkr_p11_key **keys, int *n)
+static int list_slot_keys(struct mfakr_p11 *p, CK_SLOT_ID slot,
+                          struct mfakr_p11_key **keys, int *n)
 {
 	static const CK_OBJECT_CLASS classes[] = { CKO_CERTIFICATE, CKO_PUBLIC_KEY };
 	CK_TOKEN_INFO ti;
@@ -287,7 +287,7 @@ static int list_slot_keys(struct pivkr_p11 *p, CK_SLOT_ID slot,
 	return r;
 }
 
-int pivkr_p11_list_keys(struct pivkr_p11 *p, struct pivkr_p11_key **keys, int *n)
+int mfakr_p11_list_keys(struct mfakr_p11 *p, struct mfakr_p11_key **keys, int *n)
 {
 	CK_SLOT_ID slots[MAX_SLOTS];
 	CK_ULONG nslots = MAX_SLOTS;
@@ -300,7 +300,7 @@ int pivkr_p11_list_keys(struct pivkr_p11 *p, struct pivkr_p11_key **keys, int *n
 	for (CK_ULONG i = 0; i < nslots; i++) {
 		r = list_slot_keys(p, slots[i], keys, n);
 		if (r < 0) {
-			pivkr_p11_keys_free(*keys, *n);
+			mfakr_p11_keys_free(*keys, *n);
 			*keys = NULL;
 			*n = 0;
 			return r;
@@ -309,7 +309,7 @@ int pivkr_p11_list_keys(struct pivkr_p11 *p, struct pivkr_p11_key **keys, int *n
 	return 0;
 }
 
-void pivkr_p11_keys_free(struct pivkr_p11_key *keys, int n)
+void mfakr_p11_keys_free(struct mfakr_p11_key *keys, int n)
 {
 	for (int i = 0; i < n; i++) {
 		free(keys[i].keyid);
@@ -318,7 +318,7 @@ void pivkr_p11_keys_free(struct pivkr_p11_key *keys, int n)
 	free(keys);
 }
 
-int pivkr_p11_protected_auth(struct pivkr_p11 *p, CK_SLOT_ID slot)
+int mfakr_p11_protected_auth(struct mfakr_p11 *p, CK_SLOT_ID slot)
 {
 	CK_TOKEN_INFO ti;
 
@@ -326,7 +326,7 @@ int pivkr_p11_protected_auth(struct pivkr_p11 *p, CK_SLOT_ID slot)
 	       (ti.flags & CKF_PROTECTED_AUTHENTICATION_PATH);
 }
 
-int pivkr_p11_login(struct pivkr_p11 *p, CK_SLOT_ID slot, const char *pin,
+int mfakr_p11_login(struct mfakr_p11 *p, CK_SLOT_ID slot, const char *pin,
                     CK_SESSION_HANDLE *sess)
 {
 	CK_TOKEN_INFO ti;
@@ -335,7 +335,7 @@ int pivkr_p11_login(struct pivkr_p11 *p, CK_SLOT_ID slot, const char *pin,
 	if (p->f->C_GetTokenInfo(slot, &ti) != CKR_OK)
 		return -EIO;
 	if (ti.flags & (CKF_USER_PIN_LOCKED | CKF_USER_PIN_FINAL_TRY)) {
-		pivkr_log(LOG_WARNING, "token PIN is locked or on its final try; not using it");
+		mfakr_log(LOG_WARNING, "token PIN is locked or on its final try; not using it");
 		return -ENOLCK;
 	}
 	if (!pin && !(ti.flags & CKF_PROTECTED_AUTHENTICATION_PATH))
@@ -343,7 +343,7 @@ int pivkr_p11_login(struct pivkr_p11 *p, CK_SLOT_ID slot, const char *pin,
 	/* Don't spend a retry on something that can't be this token's PIN. */
 	if (pin && (strlen(pin) < ti.ulMinPinLen ||
 	            (ti.ulMaxPinLen && strlen(pin) > ti.ulMaxPinLen))) {
-		pivkr_log(LOG_WARNING, "PIN length outside token's range %lu-%lu; not trying it",
+		mfakr_log(LOG_WARNING, "PIN length outside token's range %lu-%lu; not trying it",
 		          ti.ulMinPinLen, ti.ulMaxPinLen);
 		return -EINVAL;
 	}
@@ -359,17 +359,17 @@ int pivkr_p11_login(struct pivkr_p11 *p, CK_SLOT_ID slot, const char *pin,
 		return -EACCES;
 	if (rv == CKR_PIN_LOCKED)
 		return -ENOLCK;
-	pivkr_log(LOG_ERR, "C_Login failed: 0x%lx", rv);
+	mfakr_log(LOG_ERR, "C_Login failed: 0x%lx", rv);
 	return -EIO;
 }
 
-void pivkr_p11_logout(struct pivkr_p11 *p, CK_SESSION_HANDLE sess)
+void mfakr_p11_logout(struct mfakr_p11 *p, CK_SESSION_HANDLE sess)
 {
 	p->f->C_Logout(sess);
 	p->f->C_CloseSession(sess);
 }
 
-static int find_private_key(struct pivkr_p11 *p, CK_SESSION_HANDLE s,
+static int find_private_key(struct mfakr_p11 *p, CK_SESSION_HANDLE s,
                             const uint8_t *id, size_t idlen, CK_OBJECT_HANDLE *key)
 {
 	CK_OBJECT_CLASS cls = CKO_PRIVATE_KEY;
@@ -384,7 +384,7 @@ static int find_private_key(struct pivkr_p11 *p, CK_SESSION_HANDLE s,
 	return 0;
 }
 
-int pivkr_p11_ecdh(struct pivkr_p11 *p, CK_SESSION_HANDLE sess,
+int mfakr_p11_ecdh(struct mfakr_p11 *p, CK_SESSION_HANDLE sess,
                    const uint8_t *id, size_t idlen,
                    const uint8_t *peer, size_t peerlen,
                    uint8_t *z, size_t *zlen)
@@ -413,7 +413,7 @@ int pivkr_p11_ecdh(struct pivkr_p11 *p, CK_SESSION_HANDLE sess,
 		return -ENOENT;
 	rv = p->f->C_DeriveKey(sess, &mech, key, tmpl, sizeof(tmpl) / sizeof(tmpl[0]), &derived);
 	if (rv != CKR_OK) {
-		pivkr_log(LOG_ERR, "C_DeriveKey(ECDH) failed: 0x%lx", rv);
+		mfakr_log(LOG_ERR, "C_DeriveKey(ECDH) failed: 0x%lx", rv);
 		return -EIO;
 	}
 	rv = p->f->C_GetAttributeValue(sess, derived, &val, 1);
@@ -424,7 +424,7 @@ int pivkr_p11_ecdh(struct pivkr_p11 *p, CK_SESSION_HANDLE sess,
 	return 0;
 }
 
-int pivkr_p11_rsa_decrypt(struct pivkr_p11 *p, CK_SESSION_HANDLE sess,
+int mfakr_p11_rsa_decrypt(struct mfakr_p11 *p, CK_SESSION_HANDLE sess,
                           const uint8_t *id, size_t idlen,
                           const uint8_t *in, size_t inlen,
                           uint8_t *out, size_t *outlen)
@@ -440,7 +440,7 @@ int pivkr_p11_rsa_decrypt(struct pivkr_p11 *p, CK_SESSION_HANDLE sess,
 		return -EIO;
 	rv = p->f->C_Decrypt(sess, (CK_BYTE_PTR) in, inlen, out, &olen);
 	if (rv != CKR_OK) {
-		pivkr_log(LOG_ERR, "C_Decrypt failed: 0x%lx", rv);
+		mfakr_log(LOG_ERR, "C_Decrypt failed: 0x%lx", rv);
 		return -EIO;
 	}
 	*outlen = olen;

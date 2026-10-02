@@ -17,18 +17,18 @@
 
 #define MAX_DEVS 8
 
-int pivkr_fido2_supported(void)
+int mfakr_fido2_supported(void)
 {
 	return 1;
 }
 
-static void notify(const struct pivkr_ui *ui, const char *msg)
+static void notify(const struct mfakr_ui *ui, const char *msg)
 {
 	if (ui && ui->notify)
 		ui->notify(msg, ui->ctx);
 }
 
-static char *ask_pin(const struct pivkr_ui *ui, const char *prompt)
+static char *ask_pin(const struct mfakr_ui *ui, const char *prompt)
 {
 	return ui && ui->get_pin ? ui->get_pin(prompt, ui->ctx) : NULL;
 }
@@ -44,7 +44,7 @@ static fido_dev_t *open_dev(const fido_dev_info_t *di)
 		fido_dev_free(&dev);
 		return NULL;
 	}
-	fido_dev_set_timeout(dev, PIVKR_FIDO2_TIMEOUT_MS);
+	fido_dev_set_timeout(dev, MFAKR_FIDO2_TIMEOUT_MS);
 	return dev;
 }
 
@@ -65,7 +65,7 @@ static int dev_supports_hmac_secret(fido_dev_t *dev)
 
 static int get_hmac(fido_dev_t *dev, const char *rpid, const uint8_t *credid,
                     size_t credlen, const uint8_t *salt, int uv, const char *pin,
-                    uint8_t out[PIVKR_FIDO2_HMAC_LEN])
+                    uint8_t out[MFAKR_FIDO2_HMAC_LEN])
 {
 	fido_assert_t *a = fido_assert_new();
 	uint8_t cdh[32];
@@ -73,12 +73,12 @@ static int get_hmac(fido_dev_t *dev, const char *rpid, const uint8_t *credid,
 
 	if (!a)
 		return -ENOMEM;
-	pivkr_random(cdh, sizeof(cdh));
+	mfakr_random(cdh, sizeof(cdh));
 	if (fido_assert_set_clientdata_hash(a, cdh, sizeof(cdh)) != FIDO_OK ||
 	    fido_assert_set_rp(a, rpid) != FIDO_OK ||
 	    fido_assert_allow_cred(a, credid, credlen) != FIDO_OK ||
 	    fido_assert_set_extensions(a, FIDO_EXT_HMAC_SECRET) != FIDO_OK ||
-	    fido_assert_set_hmac_salt(a, salt, PIVKR_FIDO2_SALT_LEN) != FIDO_OK ||
+	    fido_assert_set_hmac_salt(a, salt, MFAKR_FIDO2_SALT_LEN) != FIDO_OK ||
 	    fido_assert_set_up(a, FIDO_OPT_TRUE) != FIDO_OK)
 		goto out;
 
@@ -91,14 +91,14 @@ static int get_hmac(fido_dev_t *dev, const char *rpid, const uint8_t *credid,
 		goto out;
 	}
 	if (fr != FIDO_OK) {
-		pivkr_log(LOG_ERR, "FIDO2 assertion failed: %s", fido_strerr(fr));
+		mfakr_log(LOG_ERR, "FIDO2 assertion failed: %s", fido_strerr(fr));
 		r = fr == FIDO_ERR_ACTION_TIMEOUT ? -ETIMEDOUT : -EIO;
 		goto out;
 	}
 	if (fido_assert_count(a) != 1 ||
-	    fido_assert_hmac_secret_len(a, 0) != PIVKR_FIDO2_HMAC_LEN)
+	    fido_assert_hmac_secret_len(a, 0) != MFAKR_FIDO2_HMAC_LEN)
 		goto out;
-	memcpy(out, fido_assert_hmac_secret_ptr(a, 0), PIVKR_FIDO2_HMAC_LEN);
+	memcpy(out, fido_assert_hmac_secret_ptr(a, 0), MFAKR_FIDO2_HMAC_LEN);
 	r = 0;
 out:
 	fido_assert_free(&a);
@@ -115,7 +115,7 @@ static int has_credential(fido_dev_t *dev, const char *rpid, const uint8_t *cred
 
 	if (!a)
 		return 0;
-	pivkr_random(cdh, sizeof(cdh));
+	mfakr_random(cdh, sizeof(cdh));
 	if (fido_assert_set_clientdata_hash(a, cdh, sizeof(cdh)) == FIDO_OK &&
 	    fido_assert_set_rp(a, rpid) == FIDO_OK &&
 	    fido_assert_allow_cred(a, credid, credlen) == FIDO_OK &&
@@ -125,9 +125,9 @@ static int has_credential(fido_dev_t *dev, const char *rpid, const uint8_t *cred
 	return fr == FIDO_OK;
 }
 
-int pivkr_fido2_hmac(const char *rpid, const uint8_t *credid, size_t credlen,
-                     const uint8_t salt[PIVKR_FIDO2_SALT_LEN], int uv,
-                     const struct pivkr_ui *ui, uint8_t out[PIVKR_FIDO2_HMAC_LEN])
+int mfakr_fido2_hmac(const char *rpid, const uint8_t *credid, size_t credlen,
+                     const uint8_t salt[MFAKR_FIDO2_SALT_LEN], int uv,
+                     const struct mfakr_ui *ui, uint8_t out[MFAKR_FIDO2_HMAC_LEN])
 {
 	fido_dev_info_t *devs;
 	size_t ndevs = 0;
@@ -156,7 +156,7 @@ int pivkr_fido2_hmac(const char *rpid, const uint8_t *credid, size_t credlen,
 				notify(ui, "Touch your security key to unlock the keyring.");
 				r = get_hmac(dev, rpid, credid, credlen, salt, uv, pin, out);
 			}
-			pivkr_free_secret_str(pin);
+			mfakr_free_secret_str(pin);
 		}
 		fido_dev_close(dev);
 		fido_dev_free(&dev);
@@ -165,7 +165,7 @@ int pivkr_fido2_hmac(const char *rpid, const uint8_t *credid, size_t credlen,
 	return r;
 }
 
-int pivkr_fido2_enroll(const char *rpid, int uv, const struct pivkr_ui *ui,
+int mfakr_fido2_enroll(const char *rpid, int uv, const struct mfakr_ui *ui,
                        uint8_t **credid, size_t *credlen)
 {
 	fido_dev_info_t *devs;
@@ -189,12 +189,12 @@ int pivkr_fido2_enroll(const char *rpid, int uv, const struct pivkr_ui *ui,
 		goto out;
 
 	if (!dev_supports_hmac_secret(dev)) {
-		pivkr_log(LOG_ERR, "security key does not support the hmac-secret extension");
+		mfakr_log(LOG_ERR, "security key does not support the hmac-secret extension");
 		r = -ENOTSUP;
 		goto out;
 	}
 	if (uv && !fido_dev_has_pin(dev)) {
-		pivkr_log(LOG_ERR, "security key has no PIN set; set one first or enrol without --uv");
+		mfakr_log(LOG_ERR, "security key has no PIN set; set one first or enrol without --uv");
 		r = -EINVAL;
 		goto out;
 	}
@@ -207,8 +207,8 @@ int pivkr_fido2_enroll(const char *rpid, int uv, const struct pivkr_ui *ui,
 	}
 
 	cred = fido_cred_new();
-	pivkr_random(cdh, sizeof(cdh));
-	pivkr_random(uid, sizeof(uid));
+	mfakr_random(cdh, sizeof(cdh));
+	mfakr_random(uid, sizeof(uid));
 	if (!cred ||
 	    fido_cred_set_type(cred, COSE_ES256) != FIDO_OK ||
 	    fido_cred_set_clientdata_hash(cred, cdh, sizeof(cdh)) != FIDO_OK ||
@@ -223,7 +223,7 @@ int pivkr_fido2_enroll(const char *rpid, int uv, const struct pivkr_ui *ui,
 	notify(ui, "Touch your security key to create the credential.");
 	fr = fido_dev_make_cred(dev, cred, pin);
 	if (fr != FIDO_OK) {
-		pivkr_log(LOG_ERR, "creating FIDO2 credential failed: %s", fido_strerr(fr));
+		mfakr_log(LOG_ERR, "creating FIDO2 credential failed: %s", fido_strerr(fr));
 		r = fr == FIDO_ERR_PIN_INVALID ? -EACCES : -EIO;
 		goto out;
 	}
@@ -241,7 +241,7 @@ int pivkr_fido2_enroll(const char *rpid, int uv, const struct pivkr_ui *ui,
 	memcpy(*credid, fido_cred_id_ptr(cred), *credlen);
 	r = 0;
 out:
-	pivkr_free_secret_str(pin);
+	mfakr_free_secret_str(pin);
 	fido_cred_free(&cred);
 	if (dev) {
 		fido_dev_close(dev);
@@ -253,20 +253,20 @@ out:
 
 #else /* !HAVE_FIDO2 */
 
-int pivkr_fido2_supported(void)
+int mfakr_fido2_supported(void)
 {
 	return 0;
 }
 
-int pivkr_fido2_enroll(const char *rpid, int uv, const struct pivkr_ui *ui,
+int mfakr_fido2_enroll(const char *rpid, int uv, const struct mfakr_ui *ui,
                        uint8_t **credid, size_t *credlen)
 {
 	return -ENOTSUP;
 }
 
-int pivkr_fido2_hmac(const char *rpid, const uint8_t *credid, size_t credlen,
-                     const uint8_t salt[PIVKR_FIDO2_SALT_LEN], int uv,
-                     const struct pivkr_ui *ui, uint8_t out[PIVKR_FIDO2_HMAC_LEN])
+int mfakr_fido2_hmac(const char *rpid, const uint8_t *credid, size_t credlen,
+                     const uint8_t salt[MFAKR_FIDO2_SALT_LEN], int uv,
+                     const struct mfakr_ui *ui, uint8_t out[MFAKR_FIDO2_HMAC_LEN])
 {
 	return -ENOTSUP;
 }

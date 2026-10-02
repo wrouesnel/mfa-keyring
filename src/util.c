@@ -14,16 +14,16 @@
 
 #include <sodium.h>
 
-static pivkr_log_fn log_fn;
+static mfakr_log_fn log_fn;
 static void *log_ctx;
 
-void pivkr_set_logger(pivkr_log_fn fn, void *ctx)
+void mfakr_set_logger(mfakr_log_fn fn, void *ctx)
 {
 	log_fn = fn;
 	log_ctx = ctx;
 }
 
-void pivkr_log(int prio, const char *fmt, ...)
+void mfakr_log(int prio, const char *fmt, ...)
 {
 	char buf[512];
 	va_list ap;
@@ -35,16 +35,16 @@ void pivkr_log(int prio, const char *fmt, ...)
 	if (log_fn)
 		log_fn(prio, buf, log_ctx);
 	else if (prio <= LOG_WARNING)
-		fprintf(stderr, "piv-keyring: %s\n", buf);
+		fprintf(stderr, "mfa-keyring: %s\n", buf);
 }
 
-void pivkr_memzero(void *p, size_t len)
+void mfakr_memzero(void *p, size_t len)
 {
 	if (p)
 		sodium_memzero(p, len);
 }
 
-void pivkr_free_secret_str(char *s)
+void mfakr_free_secret_str(char *s)
 {
 	if (s) {
 		sodium_memzero(s, strlen(s));
@@ -52,7 +52,7 @@ void pivkr_free_secret_str(char *s)
 	}
 }
 
-char *pivkr_b64enc(const uint8_t *data, size_t len)
+char *mfakr_b64enc(const uint8_t *data, size_t len)
 {
 	const int v = sodium_base64_VARIANT_URLSAFE_NO_PADDING;
 	size_t n = sodium_base64_ENCODED_LEN(len, v);
@@ -64,7 +64,7 @@ char *pivkr_b64enc(const uint8_t *data, size_t len)
 	return s;
 }
 
-int pivkr_b64dec(const char *s, uint8_t *out, size_t cap, size_t *outlen)
+int mfakr_b64dec(const char *s, uint8_t *out, size_t cap, size_t *outlen)
 {
 	const char *end;
 
@@ -76,7 +76,7 @@ int pivkr_b64dec(const char *s, uint8_t *out, size_t cap, size_t *outlen)
 	return 0;
 }
 
-char *pivkr_hexenc(const uint8_t *data, size_t len)
+char *mfakr_hexenc(const uint8_t *data, size_t len)
 {
 	char *s = malloc(len * 2 + 1);
 
@@ -86,7 +86,7 @@ char *pivkr_hexenc(const uint8_t *data, size_t len)
 	return s;
 }
 
-int pivkr_hexdec(const char *s, uint8_t *out, size_t cap, size_t *outlen)
+int mfakr_hexdec(const char *s, uint8_t *out, size_t cap, size_t *outlen)
 {
 	const char *end;
 
@@ -97,14 +97,14 @@ int pivkr_hexdec(const char *s, uint8_t *out, size_t cap, size_t *outlen)
 	return 0;
 }
 
-void pivkr_secret_to_password(const uint8_t secret[PIVKR_SECRET_LEN],
-                              char out[PIVKR_PASSWORD_LEN + 1])
+void mfakr_secret_to_password(const uint8_t secret[MFAKR_SECRET_LEN],
+                              char out[MFAKR_PASSWORD_LEN + 1])
 {
-	sodium_bin2base64(out, PIVKR_PASSWORD_LEN + 1, secret, PIVKR_SECRET_LEN,
+	sodium_bin2base64(out, MFAKR_PASSWORD_LEN + 1, secret, MFAKR_SECRET_LEN,
 	                  sodium_base64_VARIANT_URLSAFE_NO_PADDING);
 }
 
-char *pivkr_expand_path(const char *tmpl, const char *user, const char *home)
+char *mfakr_expand_path(const char *tmpl, const char *user, const char *home)
 {
 	size_t cap = strlen(tmpl) + 1;
 	const char *p;
@@ -180,7 +180,7 @@ static void creds_leave(struct fscreds *c)
 	c->switched = 0;
 }
 
-int pivkr_read_user_file(const char *path, uid_t uid, gid_t gid,
+int mfakr_read_user_file(const char *path, uid_t uid, gid_t gid,
                          char **data, size_t *len)
 {
 	struct fscreds c;
@@ -203,12 +203,12 @@ int pivkr_read_user_file(const char *path, uid_t uid, gid_t gid,
 		goto out;
 	}
 	if (!S_ISREG(st.st_mode) || st.st_uid != uid || (st.st_mode & 022)) {
-		pivkr_log(LOG_ERR, "%s: refusing to use: must be a regular file owned "
+		mfakr_log(LOG_ERR, "%s: refusing to use: must be a regular file owned "
 		          "by uid %u and not group/world writable", path, (unsigned) uid);
 		r = -EPERM;
 		goto out;
 	}
-	if (st.st_size > PIVKR_MAX_FILE) {
+	if (st.st_size > MFAKR_MAX_FILE) {
 		r = -EFBIG;
 		goto out;
 	}
@@ -259,7 +259,7 @@ static int mkdir_parents(const char *path)
 	return r;
 }
 
-int pivkr_write_user_file(const char *path, uid_t uid, gid_t gid,
+int mfakr_write_user_file(const char *path, uid_t uid, gid_t gid,
                           const char *data, size_t len)
 {
 	struct fscreds c;

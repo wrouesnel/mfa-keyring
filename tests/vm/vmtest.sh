@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs inside the throwaway VM as root (cloud-init runcmd).
 set -u
-exec > >(tee /var/log/pivkr-vmtest.log) 2>&1
+exec > >(tee /var/log/mfakr-vmtest.log) 2>&1
 PASS=0; FAILS=0
 ok()   { PASS=$((PASS+1)); echo "VMTEST ok $PASS - $*"; }
 bad()  { FAILS=$((FAILS+1)); echo "VMTEST FAIL - $*"; }
@@ -18,14 +18,14 @@ cp /etc/pam.d/common-password /root/common-password.orig
 ALT_BEFORE=$(readlink -f /etc/pam.d/gdm-smartcard)
 
 echo "VMTEST installing packages"
-apt-get install -y -q /mnt/libpam-piv-keyring_*.deb /mnt/piv-keyring_*.deb >/dev/null 2>&1
-check "packages installed" dpkg -s libpam-piv-keyring piv-keyring >/dev/null
+apt-get install -y -q /mnt/libpam-mfa-keyring_*.deb /mnt/mfa-keyring_*.deb >/dev/null 2>&1
+check "packages installed" dpkg -s libpam-mfa-keyring mfa-keyring >/dev/null
 check "gdm-smartcard alternative points at our stack" \
-	test "$(readlink -f /etc/pam.d/gdm-smartcard)" = /etc/pam.d/gdm-smartcard-sssd-piv-keyring
+	test "$(readlink -f /etc/pam.d/gdm-smartcard)" = /etc/pam.d/gdm-smartcard-sssd-mfa-keyring
 check "common-auth has mode=login as the last auth module" \
 	test "$(grep -E '^auth' /etc/pam.d/common-auth | tail -1 | tr -s ' \t' ' ')" = \
-	"auth optional pam_piv_keyring.so mode=login only_if=gdm-password,gdm-smartcard"
-check "common-password has the password hook" grep -q 'pam_piv_keyring.so' /etc/pam.d/common-password
+	"auth optional pam_mfa_keyring.so mode=login only_if=gdm-password,gdm-smartcard"
+check "common-password has the password hook" grep -q 'pam_mfa_keyring.so' /etc/pam.d/common-password
 echo "--- common-auth:"; grep -v '^#' /etc/pam.d/common-auth | grep .
 echo "--- common-password:"; grep -v '^#' /etc/pam.d/common-password | grep .
 
@@ -59,15 +59,15 @@ export SOFTHSM2_CONF=/home/tester/.softhsm/softhsm2.conf
 asuser env SOFTHSM2_CONF=$SOFTHSM2_CONF softhsm2-util --init-token --free --label piv --pin 123456 --so-pin 12345678 >/dev/null
 asuser env SOFTHSM2_CONF=$SOFTHSM2_CONF pkcs11-tool --module $SOFTHSM --login --pin 123456 --keypairgen \
 	--key-type EC:prime256v1 --id 03 --label "KEY MAN key" --usage-derive >/dev/null 2>&1
-printf 'Login-Pass-1\n123456\n\n' | asuser env SOFTHSM2_CONF=$SOFTHSM2_CONF piv-keyring --module $SOFTHSM enroll
-check "enrolled with the default wrap file" test -f /home/tester/.local/share/piv-keyring/login.wrap
+printf 'Login-Pass-1\n123456\n\n' | asuser env SOFTHSM2_CONF=$SOFTHSM2_CONF mfa-keyring --module $SOFTHSM enroll
+check "enrolled with the default wrap file" test -f /home/tester/.local/share/mfa-keyring/login.wrap
 
 LOCK
 check "keyring locked before login" bash -c "$(declare -f asuser LOCKED); UIDN=$UIDN; LOCKED | grep -q true"
 journalctl --rotate >/dev/null 2>&1; SINCE=$(date '+%Y-%m-%d %H:%M:%S'); sleep 1
 echo 'Login-Pass-1' | XDG_RUNTIME_DIR=/run/user/$UIDN pamtester gdm-password tester authenticate
 check "real gdm-password login unlocked the re-keyed keyring" bash -c "$(declare -f asuser LOCKED); UIDN=$UIDN; LOCKED | grep -q false"
-journalctl --since "$SINCE" --no-pager | grep -E 'gkr-pam|pam_piv_keyring' | tail -5
+journalctl --since "$SINCE" --no-pager | grep -E 'gkr-pam|pam_mfa_keyring' | tail -5
 
 # A password change through the real password stack re-wraps the slot.
 # Drive the real setuid passwd as the user, so pam_unix asks for the old password.
@@ -108,17 +108,17 @@ if ls /usr/lib/x86_64-linux-gnu/security/pam_sss.so >/dev/null 2>&1; then
 	echo "VMTEST skip - pam_sss is installed here, so the no-sssd fallback path can't be exercised"
 	echo foo | pamtester gdm-smartcard tester authenticate
 	check "smartcard stack with unconfigured sssd refuses (default=die), no keyring unlock attempted" \
-		bash -c "! journalctl --since '$SINCE' --no-pager | grep -q 'pam_piv_keyring.*smartcard'"
+		bash -c "! journalctl --since '$SINCE' --no-pager | grep -q 'pam_mfa_keyring.*smartcard'"
 fi
 
 # ---- removal restores the original PAM configuration
-apt-get remove -y -q libpam-piv-keyring >/dev/null 2>&1
+apt-get remove -y -q libpam-mfa-keyring >/dev/null 2>&1
 check "alternative restored on remove" test "$(readlink -f /etc/pam.d/gdm-smartcard)" = "$ALT_BEFORE"
 diff /root/common-auth.orig /etc/pam.d/common-auth; diff /root/common-password.orig /etc/pam.d/common-password
-check "common-auth restored on remove" bash -c '! grep -q pam_piv_keyring /etc/pam.d/common-auth'
-check "common-password restored on remove" bash -c '! grep -q pam_piv_keyring /etc/pam.d/common-password'
-apt-get purge -y -q libpam-piv-keyring >/dev/null 2>&1
-check "conffile removed on purge" test ! -e /etc/pam.d/gdm-smartcard-sssd-piv-keyring
+check "common-auth restored on remove" bash -c '! grep -q pam_mfa_keyring /etc/pam.d/common-auth'
+check "common-password restored on remove" bash -c '! grep -q pam_mfa_keyring /etc/pam.d/common-password'
+apt-get purge -y -q libpam-mfa-keyring >/dev/null 2>&1
+check "conffile removed on purge" test ! -e /etc/pam.d/gdm-smartcard-sssd-mfa-keyring
 LOCK
 echo 'Tr0ub4dor&3-Horse' | XDG_RUNTIME_DIR=/run/user/$UIDN pamtester gdm-password tester authenticate
 check "negative control: without the module, login does not unlock the re-keyed keyring" \

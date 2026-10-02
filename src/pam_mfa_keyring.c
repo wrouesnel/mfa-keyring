@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * pam_piv_keyring: recover the GNOME login keyring password from a wrap file
+ * pam_mfa_keyring: recover the GNOME login keyring password from a wrap file
  * using a PIV smartcard, FIDO2 security key or the login password, and hand it
  * to pam_gnome_keyring as PAM_AUTHTOK.
  *
- *   auth     optional pam_piv_keyring.so mode=piv       (after pam_sss forward_pass)
- *   auth     optional pam_piv_keyring.so mode=login     (after pam_unix / pam_u2f)
- *   password optional pam_piv_keyring.so                (re-wraps the password slot)
+ *   auth     optional pam_mfa_keyring.so mode=piv       (after pam_sss forward_pass)
+ *   auth     optional pam_mfa_keyring.so mode=login     (after pam_unix / pam_u2f)
+ *   password optional pam_mfa_keyring.so                (re-wraps the password slot)
  *
  * The module must run before pam_gnome_keyring in the auth stack.
  */
@@ -152,7 +152,7 @@ static int lookup_user(pam_handle_t *pamh, const struct opts *o, struct userinfo
 	u->name = strdup(pw.pw_name);
 	u->uid = pw.pw_uid;
 	u->gid = pw.pw_gid;
-	u->path = pivkr_expand_path(o->file, pw.pw_name, pw.pw_dir);
+	u->path = mfakr_expand_path(o->file, pw.pw_name, pw.pw_dir);
 	if (!u->name || !u->path) {
 		userinfo_free(u);
 		return -1;
@@ -162,20 +162,20 @@ static int lookup_user(pam_handle_t *pamh, const struct opts *o, struct userinfo
 
 /* 0 on success, 1 if the user has no wrap file, -1 on error. */
 static int load_wrapfile(pam_handle_t *pamh, const struct userinfo *u,
-                         struct pivkr_wrapfile *wf)
+                         struct mfakr_wrapfile *wf)
 {
 	char *data = NULL;
 	size_t len;
 	int r;
 
-	r = pivkr_read_user_file(u->path, u->uid, u->gid, &data, &len);
+	r = mfakr_read_user_file(u->path, u->uid, u->gid, &data, &len);
 	if (r == -ENOENT || r == -ENOTDIR)
 		return 1;
 	if (r < 0) {
 		pam_syslog(pamh, LOG_ERR, "cannot read %s: %s", u->path, strerror(-r));
 		return -1;
 	}
-	r = pivkr_wf_parse(data, len, wf);
+	r = mfakr_wf_parse(data, len, wf);
 	free(data);
 	if (r < 0) {
 		pam_syslog(pamh, LOG_ERR, "%s: malformed wrap file", u->path);
@@ -184,18 +184,18 @@ static int load_wrapfile(pam_handle_t *pamh, const struct userinfo *u,
 	if (strcmp(wf->user, u->name) != 0) {
 		pam_syslog(pamh, LOG_ERR, "%s: wrap file belongs to user %s, not %s",
 		           u->path, wf->user, u->name);
-		pivkr_wf_free(wf);
+		mfakr_wf_free(wf);
 		return -1;
 	}
 	return 0;
 }
 
-static int set_keyring_authtok(pam_handle_t *pamh, const uint8_t secret[PIVKR_SECRET_LEN])
+static int set_keyring_authtok(pam_handle_t *pamh, const uint8_t secret[MFAKR_SECRET_LEN])
 {
-	char pw[PIVKR_PASSWORD_LEN + 1];
+	char pw[MFAKR_PASSWORD_LEN + 1];
 	int r;
 
-	pivkr_secret_to_password(secret, pw);
+	mfakr_secret_to_password(secret, pw);
 	r = pam_set_item(pamh, PAM_AUTHTOK, pw);
 	sodium_memzero(pw, sizeof(pw));
 	return r;
@@ -205,9 +205,9 @@ PUBLIC int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const ch
 {
 	struct opts o;
 	struct userinfo u;
-	struct pivkr_wrapfile wf;
-	struct pivkr_ui ui = { ui_get_pin, ui_notify, pamh };
-	uint8_t secret[PIVKR_SECRET_LEN];
+	struct mfakr_wrapfile wf;
+	struct mfakr_ui ui = { ui_get_pin, ui_notify, pamh };
+	uint8_t secret[MFAKR_SECRET_LEN];
 	const char *authtok = NULL;
 	int r, ret = PAM_IGNORE;
 
@@ -215,12 +215,12 @@ PUBLIC int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const ch
 		return PAM_SERVICE_ERR;
 	if (!service_matches(pamh, o.only_if))
 		return PAM_IGNORE;
-	if (pivkr_crypto_init() < 0)
+	if (mfakr_crypto_init() < 0)
 		return PAM_SYSTEM_ERR;
-	pivkr_set_logger(log_cb, pamh);
+	mfakr_set_logger(log_cb, pamh);
 
 	if (lookup_user(pamh, &o, &u) < 0) {
-		pivkr_set_logger(NULL, NULL);
+		mfakr_set_logger(NULL, NULL);
 		return PAM_USER_UNKNOWN;
 	}
 	pam_get_item(pamh, PAM_AUTHTOK, (const void **) &authtok);
@@ -237,22 +237,22 @@ PUBLIC int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const ch
 	}
 
 	if (o.mode == MODE_PIV) {
-		struct pivkr_p11 p11;
+		struct mfakr_p11 p11;
 		char *pin = NULL;
 
 		if (!authtok && o.prompt_pin)
 			pin = ui_get_pin("PIN to unlock keyring: ", pamh);
 		if (authtok || pin) {
-			if (pivkr_p11_open(o.module, &p11) == 0) {
-				r = pivkr_open_piv(&wf, &p11, authtok ? authtok : pin, &ui, secret);
-				pivkr_p11_close(&p11);
+			if (mfakr_p11_open(o.module, &p11) == 0) {
+				r = mfakr_open_piv(&wf, &p11, authtok ? authtok : pin, &ui, secret);
+				mfakr_p11_close(&p11);
 			} else {
 				r = -EIO;
 			}
 		} else {
 			r = -ENOKEY;
 		}
-		pivkr_free_secret_str(pin);
+		mfakr_free_secret_str(pin);
 
 		if (r == 0) {
 			ret = set_keyring_authtok(pamh, secret) == PAM_SUCCESS ? PAM_SUCCESS : PAM_IGNORE;
@@ -264,13 +264,13 @@ PUBLIC int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const ch
 		}
 	} else {
 		r = -ENOKEY;
-		if (authtok && pivkr_wf_count(&wf, PIVKR_SLOT_PASSWORD) > 0) {
-			r = pivkr_open_password(&wf, authtok, secret);
+		if (authtok && mfakr_wf_count(&wf, MFAKR_SLOT_PASSWORD) > 0) {
+			r = mfakr_open_password(&wf, authtok, secret);
 			if (r < 0)
 				pam_syslog(pamh, LOG_NOTICE, "password slot did not unlock for %s; "
-				           "run 'piv-keyring set-password'", u.name);
-		} else if (!authtok && o.fido2 && pivkr_wf_count(&wf, PIVKR_SLOT_FIDO2) > 0) {
-			r = pivkr_open_fido2(&wf, &ui, secret);
+				           "run 'mfa-keyring set-password'", u.name);
+		} else if (!authtok && o.fido2 && mfakr_wf_count(&wf, MFAKR_SLOT_FIDO2) > 0) {
+			r = mfakr_open_fido2(&wf, &ui, secret);
 			if (r < 0)
 				pam_syslog(pamh, LOG_NOTICE, "could not unlock keyring secret with "
 				           "security key for %s: %s", u.name, strerror(-r));
@@ -282,10 +282,10 @@ PUBLIC int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const ch
 	if (ret == PAM_SUCCESS && o.debug)
 		pam_syslog(pamh, LOG_DEBUG, "keyring secret recovered for %s", u.name);
 	sodium_memzero(secret, sizeof(secret));
-	pivkr_wf_free(&wf);
+	mfakr_wf_free(&wf);
 out_user:
 	userinfo_free(&u);
-	pivkr_set_logger(NULL, NULL);
+	mfakr_set_logger(NULL, NULL);
 	return ret;
 }
 
@@ -302,8 +302,8 @@ PUBLIC int pam_sm_chauthtok(pam_handle_t *pamh, int flags, int argc, const char 
 {
 	struct opts o;
 	struct userinfo u;
-	struct pivkr_wrapfile wf;
-	uint8_t secret[PIVKR_SECRET_LEN];
+	struct mfakr_wrapfile wf;
+	uint8_t secret[MFAKR_SECRET_LEN];
 	const char *oldtok = NULL, *newtok = NULL;
 	char *data = NULL;
 	int r, ret = PAM_IGNORE;
@@ -314,39 +314,39 @@ PUBLIC int pam_sm_chauthtok(pam_handle_t *pamh, int flags, int argc, const char 
 		return PAM_SERVICE_ERR;
 	if (!service_matches(pamh, o.only_if))
 		return PAM_IGNORE;
-	if (pivkr_crypto_init() < 0)
+	if (mfakr_crypto_init() < 0)
 		return PAM_IGNORE;
-	pivkr_set_logger(log_cb, pamh);
+	mfakr_set_logger(log_cb, pamh);
 
 	if (lookup_user(pamh, &o, &u) < 0) {
-		pivkr_set_logger(NULL, NULL);
+		mfakr_set_logger(NULL, NULL);
 		return PAM_IGNORE;
 	}
 	if (load_wrapfile(pamh, &u, &wf) != 0)
 		goto out_user;
-	if (pivkr_wf_count(&wf, PIVKR_SLOT_PASSWORD) == 0)
+	if (mfakr_wf_count(&wf, MFAKR_SLOT_PASSWORD) == 0)
 		goto out_wf;
 
 	pam_get_item(pamh, PAM_OLDAUTHTOK, (const void **) &oldtok);
 	pam_get_item(pamh, PAM_AUTHTOK, (const void **) &newtok);
 	if (!oldtok || !newtok) {
 		pam_syslog(pamh, LOG_WARNING, "password for %s changed without the old password; "
-		           "keyring password slot is stale until 'piv-keyring set-password' is run",
+		           "keyring password slot is stale until 'mfa-keyring set-password' is run",
 		           u.name);
 		goto out_wf;
 	}
 
-	r = pivkr_open_password(&wf, oldtok, secret);
+	r = mfakr_open_password(&wf, oldtok, secret);
 	if (r < 0) {
 		pam_syslog(pamh, LOG_WARNING, "keyring password slot for %s did not match the old "
 		           "password; leaving it unchanged", u.name);
 		goto out_wf;
 	}
-	r = pivkr_set_password_slot(&wf, newtok, secret);
+	r = mfakr_set_password_slot(&wf, newtok, secret);
 	sodium_memzero(secret, sizeof(secret));
 	if (r >= 0) {
-		data = pivkr_wf_serialize(&wf);
-		r = data ? pivkr_write_user_file(u.path, u.uid, u.gid, data, strlen(data)) : -ENOMEM;
+		data = mfakr_wf_serialize(&wf);
+		r = data ? mfakr_write_user_file(u.path, u.uid, u.gid, data, strlen(data)) : -ENOMEM;
 		free(data);
 	}
 	if (r < 0) {
@@ -357,9 +357,9 @@ PUBLIC int pam_sm_chauthtok(pam_handle_t *pamh, int flags, int argc, const char 
 		ret = PAM_SUCCESS;
 	}
 out_wf:
-	pivkr_wf_free(&wf);
+	mfakr_wf_free(&wf);
 out_user:
 	userinfo_free(&u);
-	pivkr_set_logger(NULL, NULL);
+	mfakr_set_logger(NULL, NULL);
 	return ret;
 }

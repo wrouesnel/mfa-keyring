@@ -6,8 +6,8 @@
 /debian/*.substvars
 /debian/*.debhelper.log
 /debian/*.debhelper
-/debian/libpam-piv-keyring/
-/debian/piv-keyring/
+/debian/libpam-mfa-keyring/
+/debian/mfa-keyring/
 /debian/tmp/
 *.deb
 *.ddeb

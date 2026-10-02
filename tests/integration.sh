@@ -28,8 +28,8 @@ for t in softhsm2-util pkcs11-tool openssl gnome-keyring-daemon dbus-run-session
 	command -v "$t" >/dev/null || skip "$t not installed"
 done
 
-if [ -z "${PIVKR_IN_BUS:-}" ]; then
-	export PIVKR_IN_BUS=1
+if [ -z "${MFAKR_IN_BUS:-}" ]; then
+	export MFAKR_IN_BUS=1
 	exec dbus-run-session -- "$0" "$@"
 fi
 
@@ -47,7 +47,7 @@ fail() { echo "FAIL - $*"; exit 1; }
 
 PIN=123456
 LOGINPW=correct-horse
-CLI="$BUILD/piv-keyring --module $SOFTHSM_MODULE --file $T/login.wrap"
+CLI="$BUILD/mfa-keyring --module $SOFTHSM_MODULE --file $T/login.wrap"
 GKR="python3 $SRC/tests/gkr-helper.py"
 USER_NAME=$(id -un)
 
@@ -110,7 +110,7 @@ $GKR lock
 $GKR locked || fail "lock"
 printf '%s\n' "$PIN" | $CLI unlock >/dev/null 2>&1 || fail "unlock with card"
 $GKR locked && fail "still locked after unlock"
-ok "piv-keyring unlock opens the keyring with the card"
+ok "mfa-keyring unlock opens the keyring with the card"
 
 $GKR lock
 printf '%s\n' 000000 | $CLI unlock >"$T/out" 2>&1 && fail "wrong PIN unlocked"
@@ -120,7 +120,7 @@ ok "wrong PIN is rejected once without falling back to the password prompt"
 # ---------------------------------------------------------------- PAM ---
 SVC=$T/pam.d
 mkdir -p "$SVC"
-MOD=$BUILD/pam_piv_keyring.so
+MOD=$BUILD/pam_mfa_keyring.so
 OPTS="file=$T/login.wrap module=$SOFTHSM_MODULE debug"
 SET=$PAM_WRAPPER_MODULES/pam_set_items.so
 GET=$PAM_WRAPPER_MODULES/pam_get_items.so
@@ -194,11 +194,11 @@ ok "mode=piv prompt_pin asks for the PIN when none was forwarded"
 # pam_get_items; keep everything else as shipped.
 mkstack() { # mkstack NAME SSS_REPLACEMENT
 	sed -e "s|pam_sss.so|$2|" \
-	    -e "s|pam_piv_keyring.so mode=piv|$MOD mode=piv $OPTS|" \
+	    -e "s|pam_mfa_keyring.so mode=piv|$MOD mode=piv $OPTS|" \
 	    -e "s|pam_gnome_keyring.so|$GET|" \
 	    -e "s|substack        common-auth|substack        $1-common|" \
 	    -e '/^@include/d' -e '/^session/d' -e '/^account/d' -e '/^password/d' \
-	    "$SRC/pam/gdm-smartcard-sssd-piv-keyring" > "$SVC/$1"
+	    "$SRC/pam/gdm-smartcard-sssd-mfa-keyring" > "$SVC/$1"
 	printf 'auth required %s\n' "$SET" > "$SVC/$1-common"
 	sed -i "s|pam_nologin.so|$PAM_MODULES/pam_nologin.so|; s|pam_succeed_if.so|$PAM_MODULES/pam_succeed_if.so|; s|pam_echo.so|$PAM_MODULES/pam_echo.so|" "$SVC/$1"
 }

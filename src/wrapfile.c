@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-int pivkr_wf_valid_token(const char *s)
+int mfakr_wf_valid_token(const char *s)
 {
 	if (!s || !*s || strlen(s) > 4096)
 		return 0;
@@ -16,16 +16,16 @@ int pivkr_wf_valid_token(const char *s)
 	return 1;
 }
 
-int pivkr_wf_init(struct pivkr_wrapfile *wf, const char *user)
+int mfakr_wf_init(struct mfakr_wrapfile *wf, const char *user)
 {
 	memset(wf, 0, sizeof(*wf));
-	if (!pivkr_wf_valid_token(user))
+	if (!mfakr_wf_valid_token(user))
 		return -EINVAL;
 	wf->user = strdup(user);
 	return wf->user ? 0 : -ENOMEM;
 }
 
-static void slot_free(struct pivkr_slot *s)
+static void slot_free(struct mfakr_slot *s)
 {
 	free(s->type);
 	for (int i = 0; i < s->nf; i++)
@@ -33,7 +33,7 @@ static void slot_free(struct pivkr_slot *s)
 	memset(s, 0, sizeof(*s));
 }
 
-void pivkr_wf_free(struct pivkr_wrapfile *wf)
+void mfakr_wf_free(struct mfakr_wrapfile *wf)
 {
 	for (int i = 0; i < wf->nslots; i++)
 		slot_free(&wf->slots[i]);
@@ -41,18 +41,18 @@ void pivkr_wf_free(struct pivkr_wrapfile *wf)
 	memset(wf, 0, sizeof(*wf));
 }
 
-int pivkr_wf_add_slot(struct pivkr_wrapfile *wf, const char *type,
+int mfakr_wf_add_slot(struct mfakr_wrapfile *wf, const char *type,
                       int nf, const char *const *fields)
 {
-	struct pivkr_slot *s;
+	struct mfakr_slot *s;
 
 	/* Every slot carries at least a nonce and a ciphertext. */
-	if (wf->nslots >= PIVKR_MAX_SLOTS || nf < 2 || nf > PIVKR_MAX_FIELDS)
+	if (wf->nslots >= MFAKR_MAX_SLOTS || nf < 2 || nf > MFAKR_MAX_FIELDS)
 		return -E2BIG;
-	if (!pivkr_wf_valid_token(type))
+	if (!mfakr_wf_valid_token(type))
 		return -EINVAL;
 	for (int i = 0; i < nf; i++)
-		if (!pivkr_wf_valid_token(fields[i]))
+		if (!mfakr_wf_valid_token(fields[i]))
 			return -EINVAL;
 
 	s = &wf->slots[wf->nslots];
@@ -72,7 +72,7 @@ int pivkr_wf_add_slot(struct pivkr_wrapfile *wf, const char *type,
 	return wf->nslots++;
 }
 
-int pivkr_wf_remove_slot(struct pivkr_wrapfile *wf, int idx)
+int mfakr_wf_remove_slot(struct mfakr_wrapfile *wf, int idx)
 {
 	if (idx < 0 || idx >= wf->nslots)
 		return -EINVAL;
@@ -84,7 +84,7 @@ int pivkr_wf_remove_slot(struct pivkr_wrapfile *wf, int idx)
 	return 0;
 }
 
-int pivkr_wf_count(const struct pivkr_wrapfile *wf, const char *type)
+int mfakr_wf_count(const struct mfakr_wrapfile *wf, const char *type)
 {
 	int n = 0;
 
@@ -108,10 +108,10 @@ static int split(char *line, char **tok, int max)
 	return n;
 }
 
-int pivkr_wf_parse(const char *data, size_t len, struct pivkr_wrapfile *wf)
+int mfakr_wf_parse(const char *data, size_t len, struct mfakr_wrapfile *wf)
 {
 	char *copy, *line, *save = NULL;
-	char *tok[PIVKR_MAX_FIELDS + 1];
+	char *tok[MFAKR_MAX_FIELDS + 1];
 	int n, r = -EINVAL, first = 1;
 
 	memset(wf, 0, sizeof(*wf));
@@ -124,21 +124,21 @@ int pivkr_wf_parse(const char *data, size_t len, struct pivkr_wrapfile *wf)
 	for (line = strtok_r(copy, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
 		if (line[0] == '#')
 			continue;
-		n = split(line, tok, PIVKR_MAX_FIELDS + 1);
+		n = split(line, tok, MFAKR_MAX_FIELDS + 1);
 		if (n < 0)
 			goto fail;
 		if (n == 0)
 			continue;
 		if (first) {
-			if (n != 3 || strcmp(tok[0], PIVKR_WF_MAGIC) != 0 ||
+			if (n != 3 || strcmp(tok[0], MFAKR_WF_MAGIC) != 0 ||
 			    strcmp(tok[1], "1") != 0)
 				goto fail;
-			if (pivkr_wf_init(wf, tok[2]) < 0)
+			if (mfakr_wf_init(wf, tok[2]) < 0)
 				goto fail;
 			first = 0;
 			continue;
 		}
-		if (pivkr_wf_add_slot(wf, tok[0], n - 1, (const char *const *) &tok[1]) < 0)
+		if (mfakr_wf_add_slot(wf, tok[0], n - 1, (const char *const *) &tok[1]) < 0)
 			goto fail;
 	}
 	if (first)
@@ -146,12 +146,12 @@ int pivkr_wf_parse(const char *data, size_t len, struct pivkr_wrapfile *wf)
 	free(copy);
 	return 0;
 fail:
-	pivkr_wf_free(wf);
+	mfakr_wf_free(wf);
 	free(copy);
 	return r;
 }
 
-char *pivkr_wf_serialize(const struct pivkr_wrapfile *wf)
+char *mfakr_wf_serialize(const struct mfakr_wrapfile *wf)
 {
 	char *buf = NULL;
 	size_t sz = 0;
@@ -159,9 +159,9 @@ char *pivkr_wf_serialize(const struct pivkr_wrapfile *wf)
 
 	if (!f)
 		return NULL;
-	fprintf(f, "%s %d %s\n", PIVKR_WF_MAGIC, PIVKR_WF_VERSION, wf->user);
+	fprintf(f, "%s %d %s\n", MFAKR_WF_MAGIC, MFAKR_WF_VERSION, wf->user);
 	for (int i = 0; i < wf->nslots; i++) {
-		const struct pivkr_slot *s = &wf->slots[i];
+		const struct mfakr_slot *s = &wf->slots[i];
 		fputs(s->type, f);
 		for (int j = 0; j < s->nf; j++) {
 			fputc(' ', f);
@@ -176,7 +176,7 @@ char *pivkr_wf_serialize(const struct pivkr_wrapfile *wf)
 	return buf;
 }
 
-char *pivkr_wf_slot_aad(const char *user, const char *type, int nf, const char *const *fields)
+char *mfakr_wf_slot_aad(const char *user, const char *type, int nf, const char *const *fields)
 {
 	char *buf = NULL;
 	size_t sz = 0;
@@ -184,7 +184,7 @@ char *pivkr_wf_slot_aad(const char *user, const char *type, int nf, const char *
 
 	if (!f)
 		return NULL;
-	fprintf(f, "%s %d %s\n%s", PIVKR_WF_MAGIC, PIVKR_WF_VERSION, user, type);
+	fprintf(f, "%s %d %s\n%s", MFAKR_WF_MAGIC, MFAKR_WF_VERSION, user, type);
 	/* The nonce and ciphertext (last two fields) are not part of the AAD. */
 	for (int i = 0; i < nf - 2; i++)
 		fprintf(f, " %s", fields[i]);

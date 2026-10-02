@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * piv-keyring: enrol PIV smartcards, FIDO2 security keys and the login
+ * mfa-keyring: enrol PIV smartcards, FIDO2 security keys and the login
  * password as ways to unlock the GNOME login keyring.
  */
 #include "config.h"
@@ -38,7 +38,7 @@ static void die(const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	fputs("piv-keyring: ", stderr);
+	fputs("mfa-keyring: ", stderr);
 	vfprintf(stderr, fmt, ap);
 	fputc('\n', stderr);
 	va_end(ap);
@@ -92,7 +92,7 @@ static void ui_notify(const char *msg, void *ctx)
 	fprintf(stderr, "%s\n", msg);
 }
 
-static const struct pivkr_ui ui = { ui_get_pin, ui_notify, NULL };
+static const struct mfakr_ui ui = { ui_get_pin, ui_notify, NULL };
 
 static char *read_new_password(const char *what)
 {
@@ -106,21 +106,21 @@ static char *read_new_password(const char *what)
 	b = read_secret(prompt);
 	if (!b || strcmp(a, b) != 0)
 		die("passwords do not match");
-	pivkr_free_secret_str(b);
+	mfakr_free_secret_str(b);
 	return a;
 }
 
-static int load(struct pivkr_wrapfile *wf)
+static int load(struct mfakr_wrapfile *wf)
 {
 	char *data;
 	size_t len;
-	int r = pivkr_read_user_file(wrap_path, getuid(), getgid(), &data, &len);
+	int r = mfakr_read_user_file(wrap_path, getuid(), getgid(), &data, &len);
 
 	if (r == -ENOENT)
 		return r;
 	if (r < 0)
 		die("cannot read %s: %s", wrap_path, strerror(-r));
-	r = pivkr_wf_parse(data, len, wf);
+	r = mfakr_wf_parse(data, len, wf);
 	free(data);
 	if (r < 0)
 		die("%s is malformed", wrap_path);
@@ -129,34 +129,34 @@ static int load(struct pivkr_wrapfile *wf)
 	return 0;
 }
 
-static void load_or_die(struct pivkr_wrapfile *wf)
+static void load_or_die(struct mfakr_wrapfile *wf)
 {
 	if (load(wf) == -ENOENT)
-		die("not enrolled (%s does not exist); run 'piv-keyring enroll'", wrap_path);
+		die("not enrolled (%s does not exist); run 'mfa-keyring enroll'", wrap_path);
 }
 
-static void save(const struct pivkr_wrapfile *wf)
+static void save(const struct mfakr_wrapfile *wf)
 {
-	char *data = pivkr_wf_serialize(wf);
+	char *data = mfakr_wf_serialize(wf);
 	int r;
 
 	if (!data)
 		die("out of memory");
-	r = pivkr_write_user_file(wrap_path, getuid(), getgid(), data, strlen(data));
+	r = mfakr_write_user_file(wrap_path, getuid(), getgid(), data, strlen(data));
 	free(data);
 	if (r < 0)
 		die("cannot write %s: %s", wrap_path, strerror(-r));
 }
 
-static void open_p11(struct pivkr_p11 *p11)
+static void open_p11(struct mfakr_p11 *p11)
 {
-	if (pivkr_p11_open(opt_module, p11) < 0)
+	if (mfakr_p11_open(opt_module, p11) < 0)
 		die("cannot load PKCS#11 module %s", opt_module);
 }
 
-static int key_is_selected(const struct pivkr_p11_key *k, const char *sel)
+static int key_is_selected(const struct mfakr_p11_key *k, const char *sel)
 {
-	char *idhex = pivkr_hexenc(k->id, k->idlen);
+	char *idhex = mfakr_hexenc(k->id, k->idlen);
 	int match = (idhex && strcasecmp(idhex, sel) == 0) ||
 	            (strlen(sel) >= 8 && strncasecmp(k->keyid, sel, strlen(sel)) == 0);
 
@@ -164,9 +164,9 @@ static int key_is_selected(const struct pivkr_p11_key *k, const char *sel)
 	return match;
 }
 
-static void print_key(const struct pivkr_p11_key *k)
+static void print_key(const struct mfakr_p11_key *k)
 {
-	char *idhex = pivkr_hexenc(k->id, k->idlen);
+	char *idhex = mfakr_hexenc(k->id, k->idlen);
 
 	printf("  token \"%s\"  id %s  %s  %s\n    keyid %s\n", k->token, idhex ? idhex : "?",
 	       k->is_ec ? "EC " : "RSA", k->label, k->keyid);
@@ -174,9 +174,9 @@ static void print_key(const struct pivkr_p11_key *k)
 }
 
 /* Pick the card key to enrol: --key, else the PIV key-management key (id 03). */
-static const struct pivkr_p11_key *select_key(struct pivkr_p11_key *keys, int n)
+static const struct mfakr_p11_key *select_key(struct mfakr_p11_key *keys, int n)
 {
-	const struct pivkr_p11_key *found = NULL;
+	const struct mfakr_p11_key *found = NULL;
 	int matches = 0;
 
 	if (n == 0)
@@ -204,37 +204,37 @@ static const struct pivkr_p11_key *select_key(struct pivkr_p11_key *keys, int n)
 }
 
 /* Recover the secret from an existing wrap file using whatever is at hand. */
-static void recover_secret(const struct pivkr_wrapfile *wf, uint8_t secret[PIVKR_SECRET_LEN],
+static void recover_secret(const struct mfakr_wrapfile *wf, uint8_t secret[MFAKR_SECRET_LEN],
                            int allow_password)
 {
 	int has_piv = 0, r;
 
 	for (int i = 0; i < wf->nslots; i++)
-		has_piv |= pivkr_slot_is_piv(&wf->slots[i]);
+		has_piv |= mfakr_slot_is_piv(&wf->slots[i]);
 
 	if (has_piv) {
-		struct pivkr_p11 p11;
+		struct mfakr_p11 p11;
 
-		if (pivkr_p11_open(opt_module, &p11) == 0) {
-			r = pivkr_open_piv(wf, &p11, NULL, &ui, secret);
-			pivkr_p11_close(&p11);
+		if (mfakr_p11_open(opt_module, &p11) == 0) {
+			r = mfakr_open_piv(wf, &p11, NULL, &ui, secret);
+			mfakr_p11_close(&p11);
 			if (r == 0)
 				return;
 			if (r == -EACCES)
 				die("PIN incorrect");
 		}
 	}
-	if (pivkr_wf_count(wf, PIVKR_SLOT_FIDO2) > 0) {
-		r = pivkr_open_fido2(wf, &ui, secret);
+	if (mfakr_wf_count(wf, MFAKR_SLOT_FIDO2) > 0) {
+		r = mfakr_open_fido2(wf, &ui, secret);
 		if (r == 0)
 			return;
 		if (r != -ENOENT)
 			fprintf(stderr, "security key: %s\n", strerror(-r));
 	}
-	if (allow_password && pivkr_wf_count(wf, PIVKR_SLOT_PASSWORD) > 0) {
+	if (allow_password && mfakr_wf_count(wf, MFAKR_SLOT_PASSWORD) > 0) {
 		char *pw = read_secret("Login password: ");
-		r = pw ? pivkr_open_password(wf, pw, secret) : -ECANCELED;
-		pivkr_free_secret_str(pw);
+		r = pw ? mfakr_open_password(wf, pw, secret) : -ECANCELED;
+		mfakr_free_secret_str(pw);
 		if (r == 0)
 			return;
 	}
@@ -243,25 +243,25 @@ static void recover_secret(const struct pivkr_wrapfile *wf, uint8_t secret[PIVKR
 
 static int cmd_list_keys(void)
 {
-	struct pivkr_p11 p11;
-	struct pivkr_p11_key *keys;
+	struct mfakr_p11 p11;
+	struct mfakr_p11_key *keys;
 	int n;
 
 	open_p11(&p11);
-	if (pivkr_p11_list_keys(&p11, &keys, &n) < 0)
+	if (mfakr_p11_list_keys(&p11, &keys, &n) < 0)
 		die("cannot list keys");
 	if (n == 0)
 		printf("No keys found.\n");
 	for (int i = 0; i < n; i++)
 		print_key(&keys[i]);
-	pivkr_p11_keys_free(keys, n);
-	pivkr_p11_close(&p11);
+	mfakr_p11_keys_free(keys, n);
+	mfakr_p11_close(&p11);
 	return 0;
 }
 
 static int cmd_status(void)
 {
-	struct pivkr_wrapfile wf;
+	struct mfakr_wrapfile wf;
 	char *err = NULL;
 	int locked;
 
@@ -271,29 +271,29 @@ static int cmd_status(void)
 	}
 	printf("Wrap file: %s\nUser: %s\n", wrap_path, wf.user);
 	for (int i = 0; i < wf.nslots; i++) {
-		const struct pivkr_slot *s = &wf.slots[i];
+		const struct mfakr_slot *s = &wf.slots[i];
 
 		printf("  [%d] %-8s ", i, s->type);
-		if (pivkr_slot_is_piv(s) && s->nf == 4)
+		if (mfakr_slot_is_piv(s) && s->nf == 4)
 			printf("keyid %.16s…\n", s->f[0]);
-		else if (strcmp(s->type, PIVKR_SLOT_FIDO2) == 0 && s->nf == 6)
+		else if (strcmp(s->type, MFAKR_SLOT_FIDO2) == 0 && s->nf == 6)
 			printf("rp %s, %s\n", s->f[0], strcmp(s->f[1], "1") == 0 ?
 			       "PIN required" : "touch only");
-		else if (strcmp(s->type, PIVKR_SLOT_PASSWORD) == 0 && s->nf == 6)
+		else if (strcmp(s->type, MFAKR_SLOT_PASSWORD) == 0 && s->nf == 6)
 			printf("%s ops=%s mem=%luMiB\n", s->f[0], s->f[1],
 			       strtoul(s->f[2], NULL, 10) >> 20);
 		else
 			printf("(unrecognised slot)\n");
 	}
-	locked = pivkr_gkr_is_locked(&err);
+	locked = mfakr_gkr_is_locked(&err);
 	if (locked >= 0)
 		printf("Login keyring: %s\n", locked ? "locked" : "unlocked");
 	free(err);
-	pivkr_wf_free(&wf);
+	mfakr_wf_free(&wf);
 	return 0;
 }
 
-static void add_password_slot(struct pivkr_wrapfile *wf, const uint8_t *secret,
+static void add_password_slot(struct mfakr_wrapfile *wf, const uint8_t *secret,
                               const char *fallback)
 {
 	char *pw;
@@ -302,7 +302,7 @@ static void add_password_slot(struct pivkr_wrapfile *wf, const uint8_t *secret,
 	if (fallback) {
 		pw = read_secret("Login password (Enter to reuse the keyring password): ");
 		if (pw && !*pw) {
-			pivkr_free_secret_str(pw);
+			mfakr_free_secret_str(pw);
 			pw = strdup(fallback);
 		}
 	} else {
@@ -311,75 +311,75 @@ static void add_password_slot(struct pivkr_wrapfile *wf, const uint8_t *secret,
 	if (!pw || !*pw)
 		die("no password given");
 	fprintf(stderr, "Deriving key from password…\n");
-	r = pivkr_set_password_slot(wf, pw, secret);
-	pivkr_free_secret_str(pw);
+	r = mfakr_set_password_slot(wf, pw, secret);
+	mfakr_free_secret_str(pw);
 	if (r < 0)
 		die("cannot create password slot: %s", strerror(-r));
 }
 
-static void add_piv_slot(struct pivkr_wrapfile *wf, const uint8_t secret[PIVKR_SECRET_LEN])
+static void add_piv_slot(struct mfakr_wrapfile *wf, const uint8_t secret[MFAKR_SECRET_LEN])
 {
-	struct pivkr_p11 p11;
-	struct pivkr_p11_key *keys;
-	struct pivkr_wrapfile probe;
-	uint8_t check[PIVKR_SECRET_LEN];
-	const struct pivkr_p11_key *k;
+	struct mfakr_p11 p11;
+	struct mfakr_p11_key *keys;
+	struct mfakr_wrapfile probe;
+	uint8_t check[MFAKR_SECRET_LEN];
+	const struct mfakr_p11_key *k;
 	int n, r;
 
 	open_p11(&p11);
-	if (pivkr_p11_list_keys(&p11, &keys, &n) < 0)
+	if (mfakr_p11_list_keys(&p11, &keys, &n) < 0)
 		die("cannot list keys");
 	k = select_key(keys, n);
-	r = pivkr_add_piv_slot(wf, k, secret);
+	r = mfakr_add_piv_slot(wf, k, secret);
 	if (r == -EEXIST)
 		die("that key is already enrolled");
 	if (r < 0)
 		die("cannot wrap secret to card key: %s", strerror(-r));
 
 	/* Prove the card can unwrap it before we rely on it. */
-	if (pivkr_wf_init(&probe, wf->user) < 0 || pivkr_add_piv_slot(&probe, k, secret) < 0)
+	if (mfakr_wf_init(&probe, wf->user) < 0 || mfakr_add_piv_slot(&probe, k, secret) < 0)
 		die("out of memory");
 	fprintf(stderr, "Checking that the card can unwrap the secret.\n");
-	r = pivkr_open_piv(&probe, &p11, NULL, &ui, check);
-	if (r < 0 || sodium_memcmp(check, secret, PIVKR_SECRET_LEN) != 0)
+	r = mfakr_open_piv(&probe, &p11, NULL, &ui, check);
+	if (r < 0 || sodium_memcmp(check, secret, MFAKR_SECRET_LEN) != 0)
 		die("card could not unwrap the secret (%s); nothing was changed",
 		    r == -EACCES ? "wrong PIN" : strerror(-r));
 	sodium_memzero(check, sizeof(check));
-	pivkr_wf_free(&probe);
-	pivkr_p11_keys_free(keys, n);
-	pivkr_p11_close(&p11);
+	mfakr_wf_free(&probe);
+	mfakr_p11_keys_free(keys, n);
+	mfakr_p11_close(&p11);
 }
 
-static void add_fido2_slot(struct pivkr_wrapfile *wf, const uint8_t secret[PIVKR_SECRET_LEN])
+static void add_fido2_slot(struct mfakr_wrapfile *wf, const uint8_t secret[MFAKR_SECRET_LEN])
 {
 	int r;
 
-	if (!pivkr_fido2_supported())
+	if (!mfakr_fido2_supported())
 		die("built without FIDO2 support");
-	r = pivkr_add_fido2_slot(wf, opt_uv, &ui, secret);
+	r = mfakr_add_fido2_slot(wf, opt_uv, &ui, secret);
 	if (r < 0)
 		die("cannot enrol security key: %s", strerror(-r));
 }
 
 static int cmd_enroll(void)
 {
-	struct pivkr_wrapfile wf;
-	uint8_t secret[PIVKR_SECRET_LEN];
-	char newpw[PIVKR_PASSWORD_LEN + 1], *oldpw, *err = NULL;
+	struct mfakr_wrapfile wf;
+	uint8_t secret[MFAKR_SECRET_LEN];
+	char newpw[MFAKR_PASSWORD_LEN + 1], *oldpw, *err = NULL;
 
 	if (load(&wf) == 0) {
 		if (!opt_force)
 			die("already enrolled; use add-piv/add-fido2, or --force to start over "
 			    "(the keyring password must then be the current secret)");
-		pivkr_wf_free(&wf);
+		mfakr_wf_free(&wf);
 	}
 
 	oldpw = read_secret("Current login keyring password: ");
 	if (!oldpw)
 		die("no password given");
 
-	pivkr_random(secret, sizeof(secret));
-	if (pivkr_wf_init(&wf, me->pw_name) < 0)
+	mfakr_random(secret, sizeof(secret));
+	if (mfakr_wf_init(&wf, me->pw_name) < 0)
 		die("invalid user name");
 	if (opt_fido2)
 		add_fido2_slot(&wf, secret);
@@ -391,16 +391,16 @@ static int cmd_enroll(void)
 	/* Write the wrap file first: a wrap file for an unchanged keyring is
 	 * harmless, but a re-keyed keyring without its wrap file is lost. */
 	save(&wf);
-	pivkr_secret_to_password(secret, newpw);
-	if (pivkr_gkr_change_password(oldpw, newpw, &err) < 0) {
+	mfakr_secret_to_password(secret, newpw);
+	if (mfakr_gkr_change_password(oldpw, newpw, &err) < 0) {
 		unlink(wrap_path);
 		die("could not change the login keyring password: %s\n"
 		    "(is the current password right?)  Nothing was changed.", err);
 	}
 	sodium_memzero(newpw, sizeof(newpw));
 	sodium_memzero(secret, sizeof(secret));
-	pivkr_free_secret_str(oldpw);
-	pivkr_wf_free(&wf);
+	mfakr_free_secret_str(oldpw);
+	mfakr_wf_free(&wf);
 	printf("Enrolled.  The login keyring is now protected by a random secret stored in\n"
 	       "%s.\n", wrap_path);
 	return 0;
@@ -408,8 +408,8 @@ static int cmd_enroll(void)
 
 static int cmd_add(int fido2)
 {
-	struct pivkr_wrapfile wf;
-	uint8_t secret[PIVKR_SECRET_LEN];
+	struct mfakr_wrapfile wf;
+	uint8_t secret[MFAKR_SECRET_LEN];
 
 	load_or_die(&wf);
 	recover_secret(&wf, secret, 1);
@@ -419,15 +419,15 @@ static int cmd_add(int fido2)
 		add_piv_slot(&wf, secret);
 	sodium_memzero(secret, sizeof(secret));
 	save(&wf);
-	pivkr_wf_free(&wf);
+	mfakr_wf_free(&wf);
 	printf("Added.\n");
 	return 0;
 }
 
 static int cmd_set_password(void)
 {
-	struct pivkr_wrapfile wf;
-	uint8_t secret[PIVKR_SECRET_LEN];
+	struct mfakr_wrapfile wf;
+	uint8_t secret[MFAKR_SECRET_LEN];
 
 	load_or_die(&wf);
 	/* The point is usually that the old password slot is stale, so use a card or key. */
@@ -435,70 +435,70 @@ static int cmd_set_password(void)
 	add_password_slot(&wf, secret, NULL);
 	sodium_memzero(secret, sizeof(secret));
 	save(&wf);
-	pivkr_wf_free(&wf);
+	mfakr_wf_free(&wf);
 	printf("Password slot updated.\n");
 	return 0;
 }
 
 static int cmd_remove(const char *arg)
 {
-	struct pivkr_wrapfile wf;
+	struct mfakr_wrapfile wf;
 	char *end;
 	long idx = strtol(arg, &end, 10);
 	int hardware = 0;
 
 	load_or_die(&wf);
 	if (*end || idx < 0 || idx >= wf.nslots)
-		die("no slot %s (see 'piv-keyring status')", arg);
+		die("no slot %s (see 'mfa-keyring status')", arg);
 	if (wf.nslots == 1)
 		die("refusing to remove the last slot; use disenroll");
-	pivkr_wf_remove_slot(&wf, idx);
+	mfakr_wf_remove_slot(&wf, idx);
 	for (int i = 0; i < wf.nslots; i++)
-		hardware |= strcmp(wf.slots[i].type, PIVKR_SLOT_PASSWORD) != 0;
+		hardware |= strcmp(wf.slots[i].type, MFAKR_SLOT_PASSWORD) != 0;
 	if (!hardware)
 		fprintf(stderr, "warning: no card or security key slots remain\n");
 	save(&wf);
-	pivkr_wf_free(&wf);
+	mfakr_wf_free(&wf);
 	printf("Removed slot %ld.\n", idx);
 	return 0;
 }
 
 static int cmd_unlock(void)
 {
-	struct pivkr_wrapfile wf;
-	uint8_t secret[PIVKR_SECRET_LEN];
-	char pw[PIVKR_PASSWORD_LEN + 1], *err = NULL;
+	struct mfakr_wrapfile wf;
+	uint8_t secret[MFAKR_SECRET_LEN];
+	char pw[MFAKR_PASSWORD_LEN + 1], *err = NULL;
 
 	load_or_die(&wf);
 	recover_secret(&wf, secret, 1);
-	pivkr_secret_to_password(secret, pw);
+	mfakr_secret_to_password(secret, pw);
 	sodium_memzero(secret, sizeof(secret));
-	if (pivkr_gkr_unlock(pw, &err) < 0)
+	if (mfakr_gkr_unlock(pw, &err) < 0)
 		die("%s", err);
 	sodium_memzero(pw, sizeof(pw));
-	pivkr_wf_free(&wf);
+	mfakr_wf_free(&wf);
 	printf("Login keyring unlocked.\n");
 	return 0;
 }
 
 static int cmd_disenroll(void)
 {
-	struct pivkr_wrapfile wf;
-	uint8_t secret[PIVKR_SECRET_LEN];
-	char pw[PIVKR_PASSWORD_LEN + 1], *newpw, *err = NULL;
+	struct mfakr_wrapfile wf;
+	uint8_t secret[MFAKR_SECRET_LEN];
+	char pw[MFAKR_PASSWORD_LEN + 1], *newpw, *err = NULL;
 
 	load_or_die(&wf);
 	recover_secret(&wf, secret, 1);
-	pivkr_secret_to_password(secret, pw);
+	mfakr_secret_to_password(secret, pw);
 	sodium_memzero(secret, sizeof(secret));
 	newpw = read_new_password("keyring password (normally your login password)");
-	if (pivkr_gkr_change_password(pw, newpw, &err) < 0)
+	if (mfakr_gkr_change_password(pw, newpw, &err) < 0)
 		die("%s", err);
 	sodium_memzero(pw, sizeof(pw));
-	pivkr_free_secret_str(newpw);
+	mfakr_free_secret_str(newpw);
 	if (unlink(wrap_path) < 0)
 		die("keyring password changed, but cannot remove %s: %s", wrap_path, strerror(errno));
-	pivkr_wf_free(&wf);
+	mfakr_wf_free(&wf);
 	printf("Disenrolled.  The login keyring now uses the password you entered.\n");
 	return 0;
 }
@@ -506,7 +506,7 @@ static int cmd_disenroll(void)
 static void usage(FILE *f)
 {
 	fprintf(f,
-	        "Usage: piv-keyring [OPTIONS] COMMAND\n"
+	        "Usage: mfa-keyring [OPTIONS] COMMAND\n"
 	        "\n"
 	        "Commands:\n"
 	        "  status              Show enrolled slots and whether the keyring is locked\n"
@@ -560,7 +560,7 @@ int main(int argc, char **argv)
 		case O_MODULE: opt_module = optarg; break;
 		case O_FILE: opt_file = optarg; break;
 		case 'h': usage(stdout); return 0;
-		case 'V': printf("piv-keyring %s\n", PACKAGE_VERSION); return 0;
+		case 'V': printf("mfa-keyring %s\n", PACKAGE_VERSION); return 0;
 		default: usage(stderr); return 2;
 		}
 	}
@@ -570,12 +570,12 @@ int main(int argc, char **argv)
 	}
 	cmd = argv[optind++];
 
-	if (pivkr_crypto_init() < 0)
+	if (mfakr_crypto_init() < 0)
 		die("cannot initialise libsodium");
 	me = getpwuid(getuid());
 	if (!me)
 		die("cannot look up current user");
-	wrap_path = pivkr_expand_path(opt_file ? opt_file : DEFAULT_WRAP_FILE,
+	wrap_path = mfakr_expand_path(opt_file ? opt_file : DEFAULT_WRAP_FILE,
 	                              me->pw_name, me->pw_dir);
 	if (!wrap_path)
 		die("invalid --file path");

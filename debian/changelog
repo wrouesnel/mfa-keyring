@@ -1,4 +1,4 @@
-piv-keyring (0.1.0) noble; urgency=medium
+mfa-keyring (0.1.0) noble; urgency=medium
 
   * Initial release.
 
