@@ -1,0 +1,5 @@
+#cloud-config
+hostname: pivkr-test
+ssh_pwauth: false
+runcmd:
+  - [ bash, -c, "mount -o ro /dev/disk/by-label/PIVTEST /mnt && bash /mnt/vmtest.sh; sync; poweroff" ]

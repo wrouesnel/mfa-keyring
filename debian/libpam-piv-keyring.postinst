@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ]; then
+	pam-auth-update --package
+	# Above gdm3's own smartcard stacks (sssd-exclusive is 50).
+	update-alternatives --install /etc/pam.d/gdm-smartcard gdm-smartcard \
+		/etc/pam.d/gdm-smartcard-sssd-piv-keyring 60
+fi
+
+#DEBHELPER#

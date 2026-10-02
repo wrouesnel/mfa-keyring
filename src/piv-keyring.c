@@ -274,16 +274,16 @@ static int cmd_status(void)
 		const struct pivkr_slot *s = &wf.slots[i];
 
 		printf("  [%d] %-8s ", i, s->type);
-		if (pivkr_slot_is_piv(s))
+		if (pivkr_slot_is_piv(s) && s->nf == 4)
 			printf("keyid %.16s…\n", s->f[0]);
-		else if (strcmp(s->type, PIVKR_SLOT_FIDO2) == 0)
+		else if (strcmp(s->type, PIVKR_SLOT_FIDO2) == 0 && s->nf == 6)
 			printf("rp %s, %s\n", s->f[0], strcmp(s->f[1], "1") == 0 ?
 			       "PIN required" : "touch only");
-		else if (strcmp(s->type, PIVKR_SLOT_PASSWORD) == 0)
+		else if (strcmp(s->type, PIVKR_SLOT_PASSWORD) == 0 && s->nf == 6)
 			printf("%s ops=%s mem=%luMiB\n", s->f[0], s->f[1],
 			       strtoul(s->f[2], NULL, 10) >> 20);
 		else
-			printf("(unknown slot type)\n");
+			printf("(unrecognised slot)\n");
 	}
 	locked = pivkr_gkr_is_locked(&err);
 	if (locked >= 0)

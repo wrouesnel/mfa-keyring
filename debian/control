@@ -1,0 +1,60 @@
+Source: piv-keyring
+Section: admin
+Priority: optional
+Maintainer: Will Rouesnel <wrouesnel@wrouesnel.com>
+Build-Depends: debhelper-compat (= 13),
+               meson,
+               pkgconf,
+               libpam0g-dev,
+               libsodium-dev,
+               libssl-dev,
+               libp11-kit-dev,
+               libglib2.0-dev,
+               libfido2-dev,
+               libcmocka-dev <!nocheck>,
+               softhsm2 <!nocheck>,
+               libpam-wrapper <!nocheck>,
+               opensc <!nocheck>,
+               openssl <!nocheck>,
+               gnome-keyring <!nocheck>,
+               dbus-daemon <!nocheck>,
+               libglib2.0-bin <!nocheck>,
+               python3 <!nocheck>,
+               python3-gi <!nocheck>,
+               gir1.2-glib-2.0 <!nocheck>
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: libpam-piv-keyring
+Architecture: any
+Multi-Arch: same
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         libpam-runtime,
+         libpam-gnome-keyring,
+         opensc-pkcs11
+Recommends: piv-keyring, sssd
+Suggests: libpam-u2f
+Description: unlock the GNOME keyring after smartcard or security key login
+ PAM module that unlocks the GNOME login keyring when you log in to GDM with
+ a PIV smartcard (through SSSD), passwordlessly with a FIDO2 security key
+ (through pam_u2f), or with your password.
+ .
+ The keyring is protected by a random 256-bit secret, kept in a per-user file
+ sealed separately to a PIV card key (decrypted on the card with your PIN), to
+ a FIDO2 security key (hmac-secret extension) and to your login password
+ (Argon2id).
+ .
+ Installs a gdm-smartcard PAM stack as the preferred alternative and a
+ pam-auth-update profile.  Enrol with piv-keyring.
+
+Package: piv-keyring
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         opensc-pkcs11,
+         gnome-keyring
+Recommends: libpam-piv-keyring
+Description: enrol PIV smartcards and FIDO2 keys to unlock the GNOME keyring
+ Command line tool to enrol PIV smartcard keys, FIDO2 security keys and the
+ login password as ways to unlock the GNOME login keyring.  It re-keys the
+ login keyring to a random secret and writes the wrap file that
+ pam_piv_keyring uses at login.

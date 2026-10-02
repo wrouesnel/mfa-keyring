@@ -1,0 +1,4 @@
+usr/lib/*/security/pam_piv_keyring.so
+usr/share/pam-configs/piv-keyring
+etc/pam.d/gdm-smartcard-sssd-piv-keyring
+usr/share/man/man8/pam_piv_keyring.8

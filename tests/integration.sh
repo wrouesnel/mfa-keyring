@@ -39,6 +39,7 @@ cleanup() {
 	rm -rf "$T"
 }
 trap cleanup EXIT
+trap 'echo "FAIL - unexpected error at line $LINENO: $BASH_COMMAND"' ERR
 
 PASS=0
 ok() { PASS=$((PASS + 1)); echo "ok $PASS - $*"; }
@@ -282,6 +283,8 @@ TOK=$(pamrun auth symlink PAM_AUTHTOK=recovered-pw 2>/dev/null | authtok_of)
 ok "symlinked wrap file is not followed"
 
 # ------------------------------------------------------------ disenroll ---
+# Unplug the second card so the PIN prompt is for piv-card.
+softhsm2-util --module "$SOFTHSM_MODULE" --delete-token --token other-card >/dev/null
 printf '%s\nplain-again\nplain-again\n' "$PIN" | $CLI disenroll >/dev/null 2>&1 || fail "disenroll"
 [ -e "$T/login.wrap" ] && fail "wrap file left behind"
 $GKR lock

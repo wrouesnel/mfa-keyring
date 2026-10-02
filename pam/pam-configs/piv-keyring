@@ -3,7 +3,7 @@ Default: yes
 Priority: -128
 Auth-Type: Additional
 Auth:
-	optional	pam_piv_keyring.so mode=login only_if=gdm-password
+	optional	pam_piv_keyring.so mode=login only_if=gdm-password,gdm-smartcard
 Password-Type: Additional
 Password:
 	optional	pam_piv_keyring.so

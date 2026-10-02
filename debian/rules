@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+include /usr/share/dpkg/architecture.mk
+
+%:
+	dh $@ --buildsystem=meson
+
+override_dh_auto_configure:
+	dh_auto_configure -- \
+		-Dfido2=enabled \
+		-Dpamlibdir=/usr/lib/$(DEB_HOST_MULTIARCH)/security \
+		-Ddefault_pkcs11_module=/usr/lib/$(DEB_HOST_MULTIARCH)/opensc-pkcs11.so \
+		-Dtests=$(if $(filter nocheck,$(DEB_BUILD_OPTIONS) $(DEB_BUILD_PROFILES)),false,true)
+
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	dh_auto_test -- --print-errorlogs
+endif
