@@ -4,6 +4,8 @@
 # so each series gets its own build of the same code.
 #   packaging/build-source.sh [-k KEYID] [-r REF] OUTDIR [SERIES...]
 # Without -k the packages are left unsigned (to check them locally).
+# SIGN_COMMAND, if set, replaces gpg for signing (e.g. a wrapper that supplies
+# the passphrase non-interactively).
 # REF (default HEAD) is the commit or tag to package.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -40,6 +42,7 @@ DEBFULLNAME=$(sed -n 's/^Maintainer: \(.*\) <.*/\1/p' "$ROOT/debian/control")
 DEBEMAIL=$(sed -n 's/^Maintainer: .*<\(.*\)>/\1/p' "$ROOT/debian/control")
 sign=(-us -uc)
 [ -n "$KEY" ] && sign=("--sign-key=$KEY")
+[ -n "$KEY" ] && [ -n "${SIGN_COMMAND:-}" ] && sign+=("--sign-command=$SIGN_COMMAND")
 
 for series; do
 	work=$(mktemp -d)
