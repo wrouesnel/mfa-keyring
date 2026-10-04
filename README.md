@@ -4,6 +4,24 @@ Unlock the GNOME login keyring, and optionally mount an encrypted ZFS home, on
 Ubuntu when you log in with a **PIV smartcard** (via SSSD), **passwordlessly
 with a FIDO2 security key** (via pam_u2f), or with your **password**.
 
+## Installing
+
+Ubuntu packages are built by Launchpad in the PPA
+[ppa:w-rouesnel/mfa-keyring](https://launchpad.net/~w-rouesnel/+archive/ubuntu/mfa-keyring)
+for 24.04 (noble) and 26.04 (resolute):
+
+```
+sudo add-apt-repository ppa:w-rouesnel/mfa-keyring
+sudo apt install libpam-mfa-keyring mfa-keyring
+```
+
+Source uploads to the PPA are signed with the key
+`2A12 8435 A6FE 8BD7 51AA 5787 2095 9AB8 0709 6ADB`; apt verifies packages with the
+PPA's own Launchpad key, which `add-apt-repository` installs.
+
+[GitHub releases](https://github.com/wrouesnel/mfa-keyring/releases) carry the source
+and a compiled `linux-amd64` archive.
+
 ## The problem
 
 `pam_gnome_keyring` unlocks the login keyring with whatever is in
@@ -159,7 +177,10 @@ don't mount homes.
   removing it warns about ZFS-enrolled users.
 - `mfa-keyring`: the enrolment tool.
 
-Build with `dpkg-buildpackage -us -uc -b`. Tests:
+Build with `dpkg-buildpackage -us -uc -b`. CI builds and tests the packages on
+Ubuntu 24.04 and 26.04 for every push and pull request. Pushing a `vX.Y.Z` tag
+(matching `meson.build` and `debian/changelog`) uploads signed source packages to
+the PPA and makes a GitHub release. Tests:
 
 - **Unit and integration** (run during the build): SoftHSM as the card,
   pam_wrapper to run PAM stacks unprivileged, and a real gnome-keyring-daemon
@@ -175,7 +196,7 @@ Build with `dpkg-buildpackage -us -uc -b`. Tests:
 
 1. Configure SSSD smartcard login for GDM (certificate mapping for your
    users). See the Ubuntu Server guide, "Smart card authentication".
-2. Install `libpam-mfa-keyring` and `mfa-keyring`.
+2. Install `libpam-mfa-keyring` and `mfa-keyring` (see [Installing](#installing)).
 3. As the user, with the card inserted:
 
    ```

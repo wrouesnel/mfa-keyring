@@ -1,0 +1,55 @@
+name: release
+
+# GitHub releases carry code only: GitHub's source archives plus a compiled
+# binary archive with its checksum.  Ubuntu packages come from the PPA (see
+# ppa.yml); none are attached here.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  binaries:
+    needs: ci
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends meson pkgconf \
+            libpam0g-dev libsodium-dev libssl-dev libp11-kit-dev libglib2.0-dev libfido2-dev
+      - name: Binary archive
+        run: |
+          ver=${GITHUB_REF_NAME#v}
+          meson setup build --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+            -Dpamlibdir=/usr/lib/x86_64-linux-gnu/security -Dfido2=enabled -Dtests=false
+          meson compile -C build
+          DESTDIR="$PWD/stage" meson install -C build
+          mkdir release
+          tar -czf "release/mfa-keyring-$ver-linux-amd64.tar.gz" -C stage .
+          cd release && for f in *.tar.gz; do sha256sum "$f" > "$f.sha256"; done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binaries
+          path: release/
+
+  github-release:
+    needs: binaries
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: binaries
+          path: release
+      - uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: release/*

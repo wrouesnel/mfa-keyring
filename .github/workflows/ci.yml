@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: shellcheck -S warning tests/*.sh tests/vm/*.sh packaging/*.sh
+
+  # The .deb build runs the unit tests and the SoftHSM/pam_wrapper/gnome-keyring
+  # integration tests.  It runs as an unprivileged user, as on Launchpad.
+  deb:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "ubuntu:26.04"]
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build dependencies
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential devscripts equivs sudo
+          mk-build-deps -i -r -t "apt-get -y -qq --no-install-recommends" debian/control
+      - name: Build and test the packages
+        run: |
+          useradd -m builder
+          cp -a . /home/builder/src
+          chown -R builder: /home/builder/src
+          sudo -u builder sh -c 'cd /home/builder/src && dpkg-buildpackage -us -uc -b'
+          mkdir debs && cp /home/builder/*.deb debs/
+      - name: Package name for the artifact
+        id: name
+        run: echo "name=debs-$(echo '${{ matrix.image }}' | tr ':' '-')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: debs/
+
+  # The unsigned source packages the PPA workflow would upload.
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends debhelper devscripts meson
+          packaging/build-source.sh dist noble resolute

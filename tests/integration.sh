@@ -79,7 +79,7 @@ ok "list-keys sees the EC public key and the RSA certificate"
 
 # ---------------------------------------------------------- gnome-keyring ---
 export XDG_RUNTIME_DIR=$T/run XDG_DATA_HOME=$T/data HOME=$T/home
-mkdir -p -m 700 "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME" "$HOME"
+mkdir -m 700 "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME" "$HOME"
 printf '%s' "$LOGINPW" | gnome-keyring-daemon --foreground --unlock --components=secrets \
 	>"$T/gkr.log" 2>&1 &
 GKR_PID=$!

@@ -1,0 +1,73 @@
+name: ppa
+
+# Release tags (v0.1.0) upload signed source packages to the Launchpad PPA,
+# which builds them for each Ubuntu series.  A manual run builds and signs
+# without uploading unless asked.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Upload to the PPA (otherwise build and sign only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PPA: ppa:w-rouesnel/mfa-keyring
+  # Ubuntu series to build for, each as <version>-<rev>~<series>1
+  SERIES: noble resolute
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  source:
+    needs: ci
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            debhelper devscripts meson dput gnupg
+      - name: Check the tag against debian/changelog
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(dpkg-parsechangelog -S Version)
+          [ "${version%-*}" = "${GITHUB_REF_NAME#v}" ] || {
+            echo "::error::tag $GITHUB_REF_NAME but debian/changelog is $version"; exit 1; }
+      - name: Import the signing key
+        env:
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+          PACKAGE_SIGNING_KEY_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
+          FPR: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
+        run: |
+          [ -n "$PACKAGE_SIGNING_KEY" ] && [ -n "$FPR" ] ||
+            { echo "::error::PACKAGE_SIGNING_KEY or PACKAGE_SIGNING_KEY_FINGERPRINT is not set"; exit 1; }
+          gpg --batch --import <<<"$PACKAGE_SIGNING_KEY"
+          gpg --list-secret-keys "$FPR" >/dev/null
+          # Hand the passphrase to gpg-agent over stdin (no file, no pinentry
+          # on a runner), so signing needs no passphrase at all.
+          echo allow-preset-passphrase >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
+          for grip in $(gpg --with-keygrip --with-colons -K "$FPR" | awk -F: '/^grp/ {print $10}'); do
+            /usr/lib/gnupg/gpg-preset-passphrase --preset "$grip" <<<"$PACKAGE_SIGNING_KEY_PASSPHRASE"
+          done
+          echo "KEYID=$FPR" >> "$GITHUB_ENV"
+      - name: Build signed source packages
+        run: |
+          # shellcheck disable=SC2086
+          packaging/build-source.sh -k "$KEYID" dist $SERIES
+          for c in dist/*_source.changes; do gpg --verify "$c"; done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ppa-source
+          path: dist/
+      - name: Upload to ${{ env.PPA }}
+        if: startsWith(github.ref, 'refs/tags/') || inputs.upload
+        run: dput "$PPA" dist/*_source.changes
