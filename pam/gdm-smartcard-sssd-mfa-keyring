@@ -9,7 +9,9 @@
 #     PIN never reaches pam_gnome_keyring
 #   - pam_zfs_key then sees the secret, for users whose encrypted ZFS home is
 #     keyed to it (mfa-keyring zfs-enroll)
-auth    [success=ok user_unknown=ignore default=bad] pam_succeed_if.so user != root quiet_success
+#   - the root check runs after authentication instead of first.  GDM starts
+#     this service without a username so that pam_sss can identify the user
+#     from the card; pam_succeed_if would ask for a username first.
 auth    [success=ok module_unknown=3 default=die] pam_sss.so allow_missing_name require_cert_auth forward_pass
 # The next three lines only run after pam_sss verified the card and PIN.  A
 # password must never get here: it would be sent to the card as a PIN.
@@ -23,6 +25,7 @@ auth    [default=2]     pam_permit.so
 # If SSSD is not installed or configured, we still fallback to default auth
 auth    optional        pam_echo.so SSSD PAM module is not installed, Smart card authentication is not supported, falling back to default mechanism
 auth    substack        common-auth
+auth    [success=ok user_unknown=ignore default=bad] pam_succeed_if.so user != root quiet_success
 
 auth    requisite       pam_nologin.so
 auth    optional        pam_gnome_keyring.so

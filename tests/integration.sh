@@ -129,7 +129,7 @@ pamrun() { # pamrun auth|chauthtok SERVICE [env...]
 	local op=$1 svc=$2
 	shift 2
 	env "$@" LD_PRELOAD="$PAM_WRAPPER_LIB" PAM_WRAPPER=1 PAM_WRAPPER_SERVICE_DIR="$SVC" \
-		"$BUILD/tests/pamtest" "$op" "$svc" "$USER_NAME"
+		"$BUILD/tests/pamtest" "$op" "$svc" "${PAMRUN_USER:-$USER_NAME}"
 }
 authtok_of() { sed -n 's/.*authtok=//p'; }
 
@@ -210,6 +210,14 @@ OUT=$(pamrun auth gdm-sc PAM_AUTHTOK=$PIN 2>"$T/err")
 [ "$(authtok_of <<<"$OUT")" = "$SECRET" ] && grep -q 'rc=0 ' <<<"$OUT" ||
 	{ cat "$SVC/gdm-sc" "$T/err"; echo "$OUT"; fail "shipped stack, sss success"; }
 ok "shipped gdm-smartcard stack: smartcard login yields the keyring secret"
+
+# GDM starts gdm-smartcard without a username, so that pam_sss can identify
+# the user from the card (here the stand-in sets PAM_USER).  Nothing before
+# pam_sss may ask for a username.
+OUT=$(PAMRUN_USER=- pamrun auth gdm-sc PAM_USER=$USER_NAME PAM_AUTHTOK=$PIN 2>"$T/err")
+! grep -q '^PROMPT:' "$T/err" && [ "$(authtok_of <<<"$OUT")" = "$SECRET" ] ||
+	{ cat "$T/err"; echo "$OUT"; fail "shipped stack, no username"; }
+ok "shipped gdm-smartcard stack: no username prompt before pam_sss"
 
 # The fallback password must not reach mode=piv (it would be tried as a PIN).
 # Use the PIN as the "password": if the module ran, PAM_AUTHTOK would change.

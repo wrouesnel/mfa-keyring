@@ -4,6 +4,7 @@
  *
  *   pamtest auth|chauthtok SERVICE USER
  *
+ * USER "-" starts the transaction without a user, as GDM does for smartcards.
  * Prompts are answered from PAMTEST_ANSWERS (newline-separated); once those
  * run out, the answer is "PROMPTED".  Prompts and info messages go to stderr.
  * Prints "rc=<pam result> authtok=<PAM_AUTHTOK or (null)>" where PAM_AUTHTOK is
@@ -65,7 +66,7 @@ int main(int argc, char **argv)
 	}
 	if (getenv("PAMTEST_ANSWERS"))
 		answers = strdup(getenv("PAMTEST_ANSWERS"));
-	if (pam_start(argv[2], argv[3], &c, &pamh) != PAM_SUCCESS)
+	if (pam_start(argv[2], strcmp(argv[3], "-") == 0 ? NULL : argv[3], &c, &pamh) != PAM_SUCCESS)
 		return 2;
 	if (strcmp(argv[1], "auth") == 0)
 		rc = pam_authenticate(pamh, 0);
