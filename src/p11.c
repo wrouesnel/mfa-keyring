@@ -176,8 +176,8 @@ static EVP_PKEY *pkey_from_pubkey_object(struct mfakr_p11 *p, CK_SESSION_HANDLE 
 		if (curve &&
 		    OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_PKEY_PARAM_GROUP_NAME, curve, 0) &&
 		    OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PUB_KEY,
-		                                     pt ? pt->data : b2,
-		                                     pt ? (size_t) pt->length : l2))
+		                                     pt ? ASN1_STRING_get0_data(pt) : b2,
+		                                     pt ? (size_t) ASN1_STRING_length(pt) : l2))
 			pk = pkey_from_params(bld, "EC");
 		ASN1_OBJECT_free(oid);
 		ASN1_OCTET_STRING_free(pt);
