@@ -1,3 +1,12 @@
+mfa-keyring (0.1.1-1) unstable; urgency=medium
+
+  * Build with OpenSSL 4: read the EC point with the ASN1_STRING accessors.
+  * gdm-smartcard-sssd-mfa-keyring: check for root after authentication, so
+    pam_succeed_if doesn't prompt for a username before pam_sss can take
+    it from the card (LP: #2170508).
+
+ -- Will Rouesnel <wrouesnel@wrouesnel.com>  Tue, 20 Oct 2026 14:41:36 +0000
+
 mfa-keyring (0.1.0-1) unstable; urgency=medium
 
   * Initial release.
